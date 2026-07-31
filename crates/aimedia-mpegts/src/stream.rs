@@ -272,6 +272,9 @@ impl StreamDemuxer {
                     break;
                 }
             }
+            if self.bytes.len() < PACKET_SIZE {
+                break;
+            }
 
             let raw = self.bytes[..PACKET_SIZE].to_vec();
             self.bytes.drain(..PACKET_SIZE);
@@ -944,6 +947,22 @@ mod tests {
             events
                 .iter()
                 .any(|event| matches!(event, DemuxEvent::ProgramMap(_)))
+        );
+    }
+
+    #[test]
+    fn trailing_sync_candidate_waits_for_a_complete_packet() {
+        let mut input = vec![0_u8; PACKET_SIZE];
+        input[PACKET_SIZE - 41] = super::SYNC_BYTE;
+        let mut demuxer = StreamDemuxer::new();
+        let events = demuxer
+            .push(&input)
+            .expect("partial candidate remains buffered");
+        assert_eq!(demuxer.bytes.len(), 41);
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, DemuxEvent::SyncRecovered { .. }))
         );
     }
 
