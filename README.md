@@ -30,6 +30,8 @@
   环境探测；
 - libxaac AAC-LC 帧级解码/编码、1024-sample cadence、flush 和 native round-trip；
 - 一到两路输入配置、单路运行状态，以及队列/codec/GPU/SRT 可观测性契约；
+- 可注入 transport/codec 后端的单路有界调度器，已用 CPU fake backend 验证任意 TS
+  分块、解复用、独立节目时钟、编码、复用、发送和完整排空；
 - `probe`、`doctor`、`control`、`run --dry-run`、`run --mock`、`explain`、`replay`、`bench` CLI。
 - MPEG-TS、H.264/AAC elementary stream 和配置协议的 Linux fuzz 入口。
 
@@ -37,7 +39,8 @@
 
 - SRT 与 codec 串接后的持续节目输出；
 - NVDEC/NVENC 帧提交和 GPU surface copy；
-- codec、节目时钟、mux 和 SRT 之间的持续调度与重连；
+- 生产 SRT/NVDEC/NVENC/libxaac 后端与单路调度器的接线，以及断流期间的最后一帧/
+  静音保活；
 - Silero/视觉 ONNX 分析器；
 - native codec 帧级 API 和动态插件函数表。
 

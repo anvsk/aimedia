@@ -82,6 +82,9 @@ name = "aimedia-runtime"
 version = "0.1.0-alpha.1"
 dependencies = [
  "aimedia-core",
+ "aimedia-mpegts",
+ "async-trait",
+ "bytes",
  "serde_json",
  "thiserror",
  "tokio",

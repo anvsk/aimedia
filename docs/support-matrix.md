@@ -12,6 +12,7 @@
 |---|---|---|
 | `aimedia/v1alpha1` 配置 | supported | 严格字段、范围和密钥引用校验 |
 | 单路/双路配置契约 | foundation | `inputs` 接受 1–2 路；单路 state、`notApplicable` 和队列/codec/GPU/SRT 指标结构已测 |
+| 单路有界媒体调度器 | foundation | fake backend 已验证任意 TS 分块、demux/decode、独立节目时钟、encode/mux/send、任务故障联停和队列排空；生产后端尚未接线 |
 | 双机位导播状态机 | supported | replay/bench 可运行 |
 | 人工 take/hold | foundation | 状态机、版本化 Unix Socket、CLI 和 mock runtime 已测；待接视频 tick |
 | VLM 建议约束 | supported | OpenAI 兼容 client、deadline、expiry、25% 权重 |
