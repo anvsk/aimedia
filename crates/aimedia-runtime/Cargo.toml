@@ -1,6 +1,6 @@
 [package]
-name = "aimedia-core"
-description = "Core types, scheduling, synchronization, and AI director logic for aimedia"
+name = "aimedia-runtime"
+description = "Bounded dual-camera scheduler and local control plane for aimedia"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,12 +9,8 @@ authors.workspace = true
 repository.workspace = true
 
 [dependencies]
-async-trait.workspace = true
-bytes.workspace = true
-reqwest.workspace = true
-serde.workspace = true
+aimedia-core = { version = "0.1.0-alpha.1", path = "../aimedia-core" }
 serde_json.workspace = true
-serde_yaml.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true

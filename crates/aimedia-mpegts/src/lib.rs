@@ -1,9 +1,12 @@
-//! Clean-room MPEG-TS packet parsing and stream probing.
-//!
-//! The alpha parser intentionally supports complete PAT/PMT sections contained in one TS payload.
-//! Section reassembly is the next demux milestone; malformed input is rejected without panicking.
+//! Clean-room MPEG-TS packet parsing, streaming demux/mux, and stream probing.
 
 pub mod elementary;
+pub mod stream;
+
+pub use stream::{
+    AUDIO_PID, DemuxEvent, ElementaryPacket as StreamPacket, MuxPacket, MuxStream, PAT_PID,
+    PMT_PID, ProgramMap, StreamDemuxer, StreamMuxer, VIDEO_PID,
+};
 
 use std::{
     collections::{BTreeMap, HashMap},
@@ -37,6 +40,12 @@ pub enum TsError {
     SyncNotFound,
     #[error("PSI section is truncated")]
     TruncatedSection,
+    #[error("PSI section CRC is invalid")]
+    InvalidSectionCrc,
+    #[error("PES packet is malformed: {0}")]
+    MalformedPes(&'static str),
+    #[error("PES reassembly exceeded the {limit_bytes}-byte hard limit")]
+    PesBufferOverflow { limit_bytes: usize },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -6,21 +6,48 @@ metadata:
 inputs:
   - name: wide
     role: wide
-    uri: srt://0.0.0.0:9001?mode=listener
+    uri: srt://0.0.0.0:9001
     offsetMs: 0
     secretRef:
       env: AIMEDIA_SRT_WIDE_PASSPHRASE
+    srt:
+      mode: listener
+      latencyMs: 120
+      connectTimeoutMs: 3000
+      reconnect:
+        enabled: true
+        initialBackoffMs: 250
+        maxBackoffMs: 5000
+      keyLength: 16
   - name: close
     role: close
-    uri: srt://0.0.0.0:9002?mode=listener
+    uri: srt://0.0.0.0:9002
     offsetMs: 35
     secretRef:
       env: AIMEDIA_SRT_CLOSE_PASSPHRASE
+    srt:
+      mode: listener
+      latencyMs: 120
+      connectTimeoutMs: 3000
+      reconnect:
+        enabled: true
+        initialBackoffMs: 250
+        maxBackoffMs: 5000
+      keyLength: 16
 
 output:
-  uri: srt://127.0.0.1:10000?mode=caller
+  uri: srt://127.0.0.1:10000
   secretRef:
     env: AIMEDIA_SRT_OUTPUT_PASSPHRASE
+  srt:
+    mode: caller
+    latencyMs: 120
+    connectTimeoutMs: 3000
+    reconnect:
+      enabled: true
+      initialBackoffMs: 250
+      maxBackoffMs: 5000
+    keyLength: 16
 
 media:
   video:
@@ -71,3 +98,7 @@ failurePolicy:
   failoverOnDisconnect: true
   pauseAutoOnSkew: true
   ignoreVlmFailure: true
+
+control:
+  socketPath: /run/aimedia/aimedia.sock
+  socketMode: "0660"

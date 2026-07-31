@@ -1,4 +1,7 @@
+use std::{fmt, sync::Arc};
+
 use async_trait::async_trait;
+use bytes::Bytes;
 use thiserror::Error;
 
 use crate::{director::FastSignals, time::Timestamp};
@@ -27,7 +30,40 @@ pub struct MediaPacket {
     pub duration: Option<Timestamp>,
     pub keyframe: bool,
     pub discontinuity: bool,
-    pub data: Vec<u8>,
+    pub data: Bytes,
+}
+
+pub trait SurfaceLease: Send + Sync {
+    /// Opaque backend handle. Only the backend that created the lease may interpret it.
+    fn handle(&self) -> u64;
+}
+
+#[derive(Clone)]
+pub struct VideoSurface {
+    lease: Arc<dyn SurfaceLease>,
+}
+
+impl VideoSurface {
+    #[must_use]
+    pub fn new(lease: impl SurfaceLease + 'static) -> Self {
+        Self {
+            lease: Arc::new(lease),
+        }
+    }
+
+    #[must_use]
+    pub fn handle(&self) -> u64 {
+        self.lease.handle()
+    }
+}
+
+impl fmt::Debug for VideoSurface {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("VideoSurface")
+            .field("handle", &format_args!("0x{:x}", self.handle()))
+            .finish_non_exhaustive()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -37,8 +73,8 @@ pub struct VideoFrame {
     pub height: u32,
     pub format: PixelFormat,
     pub memory: MemoryDomain,
-    /// Backend-owned handle. The core never dereferences it.
-    pub surface_handle: u64,
+    /// Backend-owned RAII lease. The core can copy the lease but never dereferences the handle.
+    pub surface: VideoSurface,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

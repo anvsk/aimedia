@@ -32,7 +32,7 @@ director -> selected PCM -> loudness match/crossfade -> AAC -> MPEG-TS
 
 ## 音频
 
-音频跟随镜头需要两路持续解码为 48kHz 双声道 PCM。切换时先根据 K-weighted 400ms 窗估计增益，再执行 80ms 等功率交叉淡化。当前基础实现提供 sample peak 限制；真正的 4x oversampled true-peak limiter 属于 AAC 后端集成阶段。
+音频跟随镜头需要两路持续解码为 48kHz 双声道 PCM。切换时先根据 K-weighted 滚动窗口估计增益，再执行 80ms 等功率交叉淡化。当前 DSP 已提供 4x windowed-sinc true-peak 检测和 block limiter；接入 AAC 后还需让相邻 block 共享历史采样，覆盖编码帧边界。
 
 ## 安全边界
 

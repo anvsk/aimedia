@@ -18,7 +18,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --check
       - run: cargo check --workspace
+      - run: cargo test --workspace
       - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo run -p aimedia -- doctor --json
       - run: cargo run -p aimedia -- run -f examples/director.yaml --dry-run
       - run: cargo run -p aimedia -- replay examples/replay.jsonl -f examples/director.yaml
 

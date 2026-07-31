@@ -94,14 +94,12 @@ pub type DirectorEvent = DirectorDecision;
 pub enum DirectorError {
     #[error("input index must be 0 or 1, got {0}")]
     InvalidInput(usize),
-    #[error("manual hold must be greater than zero")]
-    ZeroHold,
 }
 
 #[derive(Debug, Clone, Copy)]
 struct ManualHold {
     input: usize,
-    until_ms: u64,
+    until_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -155,12 +153,9 @@ impl Director {
         if input > 1 {
             return Err(DirectorError::InvalidInput(input));
         }
-        if hold_ms == 0 {
-            return Err(DirectorError::ZeroHold);
-        }
         self.manual_hold = Some(ManualHold {
             input,
-            until_ms: now_ms.saturating_add(hold_ms),
+            until_ms: (hold_ms != 0).then(|| now_ms.saturating_add(hold_ms)),
         });
         self.candidate = None;
         Ok(())
@@ -175,6 +170,16 @@ impl Director {
         self.auto_enabled = true;
         self.manual_hold = None;
         self.candidate = None;
+    }
+
+    #[must_use]
+    pub const fn auto_enabled(&self) -> bool {
+        self.auto_enabled && self.manual_hold.is_none()
+    }
+
+    #[must_use]
+    pub fn hold_until_ms(&self) -> Option<u64> {
+        self.manual_hold.and_then(|hold| hold.until_ms)
     }
 
     #[must_use]
@@ -201,7 +206,7 @@ impl Director {
         }
 
         if let Some(hold) = self.manual_hold {
-            if now_ms < hold.until_ms {
+            if hold.until_ms.is_none_or(|until_ms| now_ms < until_ms) {
                 if cameras[hold.input].eligible() {
                     return self.switch_or_hold(
                         hold.input,

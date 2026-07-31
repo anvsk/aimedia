@@ -8,7 +8,7 @@
 
 `aimedia` 是一个面向直播平台和 AI 应用开发者的开源、AI 原生双机位导播引擎。长期目标是在明确的支持矩阵内逐步替代 FFmpeg，而不是以未完成的“全格式兼容”作为宣传。
 
-> 开发预览：确定性导播内核、配置、回放和媒体 parser 已可运行；SRT/NVDEC/NVENC 实时数据面尚未接通。项目名是工作名，公开品牌使用前仍需完成名称与商标检索。
+> 开发预览：流式 TS、SRT adapter、节目时钟和本机控制面已经进入第二阶段开发；NVDEC/NVENC、libxaac 帧处理和完整实时数据面尚未闭环。项目名是工作名，公开品牌使用前仍需完成名称与商标检索。
 
 ## 当前状态
 
@@ -19,17 +19,19 @@
 - 带最短镜头、迟滞、候选保持、故障切换和人工 `take` 的双机位状态机；
 - VLM 建议 25% 权重上限、有效期校验和 OpenAI 兼容接口；
 - 48kHz BS.1770 K-weighting 滚动响度估计、增益计算和 80ms 等功率音频切换；
-- clean-room MPEG-TS packet、PAT、PMT、PCR、continuity counter、H.264 Annex-B 和 AAC ADTS 解析；
-- `probe`、`run --dry-run`、`explain`、`replay`、`bench` CLI。
+- clean-room MPEG-TS 流式同步、PSI/PES 重组、PTS 回绕、PAT/PMT/PCR、TS mux、H.264 Annex-B 和 AAC ADTS；
+- 独立节目时钟、队列容量计算、1ms/s 漂移校正和版本化 Unix Socket 控制面；
+- 运行时加载的 libsrt caller/listener/epoll/加密/统计边界，以及 NVIDIA/libxaac 环境探测；
+- `probe`、`doctor`、`control`、`run --dry-run`、`run --mock`、`explain`、`replay`、`bench` CLI。
 - MPEG-TS、H.264/AAC elementary stream 和配置协议的 Linux fuzz 入口。
 
 尚未实现、也不会伪装成已经实现：
 
-- `libsrt` 实时输入输出；
-- NVDEC/NVENC 和 CUDA surface；
-- H.264/AAC 实际解码与编码；
+- SRT 与 codec 串接后的持续节目输出；
+- NVDEC/NVENC 帧提交和 GPU surface copy；
+- libxaac 实际解码与编码；
 - Silero/视觉 ONNX 分析器；
-- native 控制 API 和动态插件函数表。
+- native codec 帧级 API 和动态插件函数表。
 
 这些边界已经在 `aimedia-core::backend` 中定义，后续实现不需要把 FFmpeg 引入运行时。
 
@@ -39,7 +41,9 @@
 
 ```bash
 cargo run -p aimedia -- explain -f examples/director.yaml
+cargo run -p aimedia -- doctor --json
 cargo run -p aimedia -- run -f examples/director.yaml --dry-run
+cargo run -p aimedia -- run -f examples/director.yaml --mock
 cargo run -p aimedia -- replay examples/replay.jsonl -f examples/director.yaml
 cargo run -p aimedia -- bench -f examples/director.yaml \
   --capture examples/replay.jsonl --iterations 1000
@@ -47,7 +51,9 @@ cargo run -p aimedia -- probe sample.ts --json
 docker build -t aimedia:dev .
 ```
 
-当前 `run` 不带 `--dry-run` 会明确失败，因为 native 媒体后端尚未链接。实时能力的完成情况以 [支持矩阵](docs/support-matrix.md) 为准。
+当前 `run` 不带 `--dry-run` 或 `--mock` 会明确失败，因为 codec 帧处理尚未闭环。`--mock`
+会运行真实节目调度器和 Unix Socket，但不发送媒体。实时能力的完成情况以
+[支持矩阵](docs/support-matrix.md) 为准。
 
 ## 设计原则
 
@@ -68,7 +74,13 @@ cargo fuzz run elementary
 cargo fuzz run config
 ```
 
-更详细的运行链路见 [架构说明](docs/architecture.md)，阶段交付见 [路线图](docs/roadmap.md)。
+进一步阅读：
+
+- [中文快速入门](docs/getting-started.zh-CN.md)
+- [用户故事与验收场景](docs/user-stories.md)
+- [直播媒体术语表](docs/glossary.md)
+- [为什么采用这套架构](docs/design-rationale.md)
+- [架构说明](docs/architecture.md)、[路线图](docs/roadmap.md)和[支持矩阵](docs/support-matrix.md)
 
 ## 许可证
 

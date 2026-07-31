@@ -1,6 +1,6 @@
 [package]
-name = "aimedia-mpegts"
-description = "Clean-room MPEG-TS packet parser and probe utilities for aimedia"
+name = "aimedia-nvidia"
+description = "NVIDIA Video Codec SDK 13.0 boundary and CUDA surface ownership for aimedia"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,7 +9,8 @@ authors.workspace = true
 repository.workspace = true
 
 [dependencies]
-bytes.workspace = true
+aimedia-core = { version = "0.1.0-alpha.1", path = "../aimedia-core" }
+libloading.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 

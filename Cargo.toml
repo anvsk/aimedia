@@ -1,8 +1,12 @@
 [workspace]
 members = [
     "crates/aimedia-cli",
+    "crates/aimedia-aac",
     "crates/aimedia-core",
     "crates/aimedia-mpegts",
+    "crates/aimedia-nvidia",
+    "crates/aimedia-runtime",
+    "crates/aimedia-srt",
 ]
 exclude = ["fuzz"]
 resolver = "2"
@@ -18,15 +22,19 @@ repository = "https://github.com/anvsk/aimedia"
 [workspace.dependencies]
 anyhow = "1.0.98"
 async-trait = "0.1.88"
+bytes = { version = "1.10.1", features = ["serde"] }
 clap = { version = "4.5.40", features = ["derive"] }
+libc = "0.2.174"
+libloading = "0.8.8"
 reqwest = { version = "0.12.22", default-features = false, features = ["json", "rustls-tls"] }
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.140"
 serde_yaml = "0.9.34"
 thiserror = "2.0.12"
-tokio = { version = "1.45.1", features = ["macros", "rt-multi-thread", "time"] }
+tokio = { version = "1.45.1", features = ["fs", "io-util", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter", "fmt"] }
+url = "2.5.4"
 
 [workspace.lints.rust]
 missing_debug_implementations = "warn"

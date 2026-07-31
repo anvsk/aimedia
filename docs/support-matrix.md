@@ -11,15 +11,15 @@
 |---|---|---|
 | `aimedia/v1alpha1` 配置 | supported | 严格字段、范围和密钥引用校验 |
 | 双机位导播状态机 | supported | replay/bench 可运行 |
-| 人工 take/hold | supported | 核心 API 和 replay command |
+| 人工 take/hold | foundation | 状态机、版本化 Unix Socket、CLI 和 mock runtime 已测；待接视频 tick |
 | VLM 建议约束 | supported | OpenAI 兼容 client、deadline、expiry、25% 权重 |
-| MPEG-TS packet probe | supported | PAT/PMT 单包 section、PCR、continuity |
-| H.264 Annex-B / AAC ADTS parser | supported | NAL/frame 边界与关键 header，尚未做 access-unit/PES 重组 |
-| 跨包 PSI/PES reassembly | planned | native demux 阶段 |
-| BS.1770 风格滚动响度 | foundation | 已有 DSP；未接 AAC codec |
-| SRT caller/listener | planned | 必须使用 `libsrt` adapter |
-| NVDEC/NVENC | planned | Linux NVIDIA 首发后端 |
-| AAC-LC via libxaac | planned | 48kHz stereo Alpha profile |
+| MPEG-TS packet probe | supported | PAT/PMT、PCR、continuity 和损坏包报告 |
+| 流式 MPEG-TS demux/mux | foundation | 任意字节分块、PSI/PES、CRC、PTS 回绕和 mux 往返已测；待真实流互操作 |
+| H.264 Annex-B / AAC ADTS parser | supported | NAL/frame、关键帧和 Alpha profile header |
+| BS.1770/4x true-peak DSP | foundation | 响度、增益、淡化和 limiter 已实现；未接 AAC codec |
+| SRT caller/listener | foundation | libsrt 1.5.5 adapter、epoll 和本机 native 回环已测；待自动重连/损伤测试 |
+| NVDEC/NVENC | foundation | SDK 13.0 driver probe 和 RAII surface 已实现；帧提交尚未实现 |
+| AAC-LC via libxaac | foundation | decoder/encoder 动态库和 Alpha profile 探测；帧 API 尚未实现 |
 | Silero VAD / 视觉 ONNX | planned | ONNX Runtime adapter |
 | REST/WebSocket 控制面 | planned | Beta |
 | RTMP、WHIP/WHEP | out-of-scope | 后续阶段 |
