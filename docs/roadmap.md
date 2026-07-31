@@ -21,6 +21,8 @@
 - libsrt 1.5.5 caller/listener 回环、独立节目时钟和有界队列原语；
 - NVIDIA Video Codec SDK 13.0、CUDA/NVDEC/NVENC 和 libxaac 可用性探测；
 - libxaac AAC-LC 帧级编码/解码、固定 1024-sample cadence 和 native round-trip；
+- 一到两路输入配置、单路状态、`notApplicable` 控制错误，以及队列/codec/GPU/SRT
+  可观测性契约；
 - 确定性导播、音频 DSP、VLM contract、replay、bench、fuzz 和 CPU CI。
 
 当前尚不能完成真实直播闭环。NVDEC/NVENC 帧提交、codec 到 scheduler 的集成以及

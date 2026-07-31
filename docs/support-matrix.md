@@ -11,13 +11,14 @@
 | 能力 | 状态 | 说明 |
 |---|---|---|
 | `aimedia/v1alpha1` 配置 | supported | 严格字段、范围和密钥引用校验 |
+| 单路/双路配置契约 | foundation | `inputs` 接受 1–2 路；单路 state、`notApplicable` 和队列/codec/GPU/SRT 指标结构已测 |
 | 双机位导播状态机 | supported | replay/bench 可运行 |
 | 人工 take/hold | foundation | 状态机、版本化 Unix Socket、CLI 和 mock runtime 已测；待接视频 tick |
 | VLM 建议约束 | supported | OpenAI 兼容 client、deadline、expiry、25% 权重 |
 | MPEG-TS packet probe | supported | PAT/PMT、PCR、continuity 和损坏包报告 |
 | 流式 MPEG-TS demux/mux | foundation | 任意字节分块、PSI/PES、CRC、PTS 回绕和 mux 往返已测；待真实流互操作 |
 | H.264 Annex-B / AAC ADTS parser | supported | NAL/frame、关键帧和 Alpha profile header |
-| BS.1770/4x true-peak DSP | foundation | 响度、增益、淡化和 limiter 已实现；未接 AAC codec |
+| BS.1770/4x true-peak DSP | foundation | 响度、增益、淡化和 limiter 已实现；AAC 帧级 codec 已就绪，待接运行时音频链 |
 | SRT caller/listener | foundation | libsrt 1.5.5 adapter、epoll 和本机 native 回环已测；待自动重连/损伤测试 |
 | RTMP/RTMPS + FLV | planned | v0.4 中外共同平台发布基线 |
 | RTSP/RTP input | planned | v0.6 中国侧摄像机接入；不代表 GB28181 |

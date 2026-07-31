@@ -10,7 +10,9 @@
 机位 close --SRT--> /
 ```
 
-两路输入必须都是 MPEG-TS，视频为 H.264 8-bit 4:2:0、最高 1080p30，音频为 AAC-LC 48kHz 双声道，而且分辨率和帧率相同。
+配置允许一路或两路输入。v0.2 优先接通单路闭环；两路导播数据面属于 v0.3。输入
+必须是 MPEG-TS，视频为 H.264 8-bit 4:2:0、最高 1080p30，音频为 AAC-LC
+48kHz 双声道；两路模式还要求分辨率和帧率相同。
 
 不熟悉缩写时先看[术语表](glossary.md)，架构取舍见[设计理由](design-rationale.md)。
 
@@ -33,7 +35,8 @@ docker run --rm --gpus all \
 
 ## 3. 准备配置
 
-复制 `examples/director.yaml`，修改三个 SRT URI。密码不能直接写入 YAML：
+单路从 `examples/single-srt.yaml` 开始；体验双路控制协议时复制
+`examples/director.yaml`。修改 SRT URI 后，密码不能直接写入 YAML：
 
 ```bash
 export AIMEDIA_SRT_WIDE_PASSPHRASE='replace-me'
@@ -44,9 +47,12 @@ export AIMEDIA_SRT_OUTPUT_PASSPHRASE='replace-me'
 先只检查配置和图：
 
 ```bash
-aimedia explain -f director.yaml
-aimedia run -f director.yaml --dry-run
+aimedia explain -f examples/single-srt.yaml
+aimedia run -f examples/single-srt.yaml --dry-run
 ```
+
+单路配置的 `state --json` 返回 `mode: single`。此模式没有选镜对象，`take` 和
+`auto` 会稳定返回 `notApplicable`，这不是输入故障。
 
 ## 4. 启动当前可用的调度器和人工切镜
 

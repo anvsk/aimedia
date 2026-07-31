@@ -8,7 +8,8 @@ use std::{
 
 use aimedia_core::{
     CameraSnapshot, ControlCommand, ControlErrorCode, ControlRequest, ControlResponse, Director,
-    FastSignals, InputRuntimeState, PipelineConfig, PipelineMode, PipelineRuntimeState,
+    FastSignals, GpuSurfaceRuntimeStats, InputCodecRuntimeStats, InputRuntimeState,
+    OutputRuntimeState, PipelineConfig, PipelineMode, PipelineRuntimeState, QueueRuntimeState,
     SrtRuntimeStats, SwitchReason, config::parse_socket_mode,
 };
 use thiserror::Error;
@@ -150,44 +151,74 @@ impl DriftCorrector {
 struct Controller {
     pipeline: String,
     started: Instant,
+    input_count: usize,
     director: Director,
     cameras: [CameraSnapshot; 2],
     input_states: [InputRuntimeState; 2],
+    output_state: OutputRuntimeState,
+    queues: Vec<QueueRuntimeState>,
     last_reason: SwitchReason,
 }
 
 impl Controller {
     fn new(config: &PipelineConfig, healthy: bool) -> Self {
+        let input_count = config.inputs.len();
         let cameras = std::array::from_fn(|index| CameraSnapshot {
-            name: config.inputs[index].name.clone(),
+            name: config.inputs.get(index).map_or_else(
+                || format!("unconfigured-{index}"),
+                |input| input.name.clone(),
+            ),
             fast: FastSignals {
                 vad: 0.0,
                 mouth_motion: 0.0,
                 composition: 0.5,
-                quality: 1.0,
-                transport_health: if healthy { 1.0 } else { 0.0 },
+                quality: if index < input_count { 1.0 } else { 0.0 },
+                transport_health: if healthy && index < input_count {
+                    1.0
+                } else {
+                    0.0
+                },
             },
-            healthy,
-            synchronized: healthy,
+            healthy: healthy && index < input_count,
+            synchronized: healthy && index < input_count,
             frozen: false,
             skew_ms: 0,
         });
         let input_states = std::array::from_fn(|index| InputRuntimeState {
-            name: config.inputs[index].name.clone(),
-            healthy,
-            synchronized: healthy,
+            name: cameras[index].name.clone(),
+            healthy: healthy && index < input_count,
+            synchronized: healthy && index < input_count,
             frozen: false,
             skew_ms: 0,
             video_timeline_depth: 0,
             audio_timeline_depth: 0,
             srt: SrtRuntimeStats {
-                connected: healthy,
+                connected: healthy && index < input_count,
                 ..SrtRuntimeStats::default()
             },
+            codec: InputCodecRuntimeStats::default(),
+            gpu: GpuSurfaceRuntimeStats::default(),
         });
+        let capacities = QueueCapacities::from_config(config);
+        let mut queues = Vec::with_capacity(input_count * 4 + 3);
+        for index in 0..input_count {
+            let name = &config.inputs[index].name;
+            queues.extend([
+                queue_state(format!("{name}.transport"), capacities.transport_messages),
+                queue_state(format!("{name}.videoDecode"), capacities.video_frames),
+                queue_state(format!("{name}.audioDecode"), capacities.audio_blocks),
+                queue_state(format!("{name}.timeline"), capacities.video_frames),
+            ]);
+        }
+        queues.extend([
+            queue_state("program.videoEncode", capacities.video_frames),
+            queue_state("program.audioEncode", capacities.audio_blocks),
+            queue_state("program.output", capacities.encoded_messages),
+        ]);
         Self {
             pipeline: config.metadata.name.clone(),
             started: Instant::now(),
+            input_count,
             director: Director::new(
                 config.director_policy.clone(),
                 config.vlm_advisor.weight,
@@ -196,6 +227,8 @@ impl Controller {
             ),
             cameras,
             input_states,
+            output_state: OutputRuntimeState::default(),
+            queues,
             last_reason: SwitchReason::Initial,
         }
     }
@@ -217,13 +250,21 @@ impl Controller {
             running: true,
             active_input: active,
             active_name: self.cameras[active].name.clone(),
-            mode: if self.director.auto_enabled() {
+            mode: if self.input_count == 1 {
+                PipelineMode::Single
+            } else if self.director.auto_enabled() {
                 PipelineMode::Automatic
             } else {
                 PipelineMode::Manual
             },
-            hold_until_ms: self.director.hold_until_ms(),
-            inputs: self.input_states.clone(),
+            hold_until_ms: if self.input_count == 1 {
+                None
+            } else {
+                self.director.hold_until_ms()
+            },
+            inputs: self.input_states[..self.input_count].to_vec(),
+            output: self.output_state.clone(),
+            queues: self.queues.clone(),
             last_reason: format!("{:?}", self.last_reason),
         }
     }
@@ -248,6 +289,14 @@ impl Controller {
 
         match request.command {
             ControlCommand::Take { input, hold_ms } => {
+                if self.input_count == 1 {
+                    return ControlResponse::rejected(
+                        request.request_id,
+                        ControlErrorCode::NotApplicable,
+                        "take is not applicable to a single-input pipeline",
+                        Some(self.state()),
+                    );
+                }
                 if hold_ms != 0 && !(100..=3_600_000).contains(&hold_ms) {
                     return ControlResponse::rejected(
                         request.request_id,
@@ -286,6 +335,14 @@ impl Controller {
                 ControlResponse::accepted(request.request_id, self.state())
             }
             ControlCommand::Auto => {
+                if self.input_count == 1 {
+                    return ControlResponse::rejected(
+                        request.request_id,
+                        ControlErrorCode::NotApplicable,
+                        "auto is not applicable to a single-input pipeline",
+                        Some(self.state()),
+                    );
+                }
                 self.director.resume_auto();
                 self.tick();
                 ControlResponse::accepted(request.request_id, self.state())
@@ -298,7 +355,7 @@ impl Controller {
     }
 
     fn set_input_state(&mut self, index: usize, update: InputRuntimeState) {
-        if index > 1 {
+        if index >= self.input_count {
             return;
         }
         self.cameras[index].healthy = update.healthy;
@@ -308,6 +365,15 @@ impl Controller {
         self.cameras[index].fast.transport_health = if update.healthy { 1.0 } else { 0.0 };
         self.input_states[index] = update;
         self.tick();
+    }
+}
+
+fn queue_state(name: impl Into<String>, capacity: usize) -> QueueRuntimeState {
+    QueueRuntimeState {
+        name: name.into(),
+        depth: 0,
+        capacity,
+        high_watermark: 0,
     }
 }
 
@@ -567,6 +633,11 @@ mod tests {
             .expect("reference config parses")
     }
 
+    fn single_config() -> PipelineConfig {
+        PipelineConfig::from_yaml(include_str!("../../../examples/single-srt.yaml"))
+            .expect("single-input config parses")
+    }
+
     #[test]
     fn program_clock_is_monotonic_without_float_accumulation() {
         let mut clock = ProgramClock::new(30_000, 1_001);
@@ -620,6 +691,42 @@ mod tests {
             automatic.state.expect("auto state").mode,
             PipelineMode::Automatic
         );
+    }
+
+    #[tokio::test]
+    async fn single_input_reports_mode_and_rejects_director_commands() {
+        let config = single_config();
+        let controller = ControllerHandle::new(&config, true);
+
+        let state = controller
+            .process(ControlRequest::state("state"))
+            .await
+            .state
+            .expect("single state");
+        assert_eq!(state.mode, PipelineMode::Single);
+        assert_eq!(state.inputs.len(), 1);
+        assert_eq!(state.active_name, "program");
+        assert!(!state.queues.is_empty());
+        assert!(state.queues.iter().all(|queue| queue.capacity > 0));
+        let serialized = serde_json::to_value(&state).expect("state serializes");
+        assert_eq!(serialized["mode"], "single");
+        assert_eq!(serialized["inputs"][0]["codec"]["videoDecodedFrames"], 0);
+        assert_eq!(serialized["inputs"][0]["gpu"]["highWatermark"], 0);
+        assert_eq!(serialized["output"]["srt"]["reconnects"], 0);
+        assert!(serialized["queues"][0]["capacity"].as_u64().unwrap_or(0) > 0);
+
+        for request in [
+            ControlRequest::take("take", "program", 5_000),
+            ControlRequest::auto("auto"),
+        ] {
+            let response = controller.process(request).await;
+            assert!(!response.accepted);
+            assert_eq!(response.error_code, Some(ControlErrorCode::NotApplicable));
+            assert_eq!(
+                response.state.expect("rejection state").mode,
+                PipelineMode::Single
+            );
+        }
     }
 
     #[test]
