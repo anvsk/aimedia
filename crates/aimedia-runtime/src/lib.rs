@@ -1,5 +1,7 @@
 //! Program scheduling, bounded-capacity calculations, and the local control plane.
 
+pub mod single;
+
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
@@ -10,7 +12,7 @@ use aimedia_core::{
     CameraSnapshot, ControlCommand, ControlErrorCode, ControlRequest, ControlResponse, Director,
     FastSignals, GpuSurfaceRuntimeStats, InputCodecRuntimeStats, InputRuntimeState,
     OutputRuntimeState, PipelineConfig, PipelineMode, PipelineRuntimeState, QueueRuntimeState,
-    SrtRuntimeStats, SwitchReason, config::parse_socket_mode,
+    SrtRuntimeStats, SwitchReason, backend::CodecId, config::parse_socket_mode,
 };
 use thiserror::Error;
 use tokio::sync::Mutex;
@@ -151,6 +153,7 @@ impl DriftCorrector {
 struct Controller {
     pipeline: String,
     started: Instant,
+    running: bool,
     input_count: usize,
     director: Director,
     cameras: [CameraSnapshot; 2],
@@ -200,24 +203,22 @@ impl Controller {
             gpu: GpuSurfaceRuntimeStats::default(),
         });
         let capacities = QueueCapacities::from_config(config);
-        let mut queues = Vec::with_capacity(input_count * 4 + 3);
+        let mut queues = Vec::with_capacity(input_count * 5 + 1);
         for index in 0..input_count {
             let name = &config.inputs[index].name;
             queues.extend([
                 queue_state(format!("{name}.transport"), capacities.transport_messages),
                 queue_state(format!("{name}.videoDecode"), capacities.video_frames),
                 queue_state(format!("{name}.audioDecode"), capacities.audio_blocks),
-                queue_state(format!("{name}.timeline"), capacities.video_frames),
+                queue_state(format!("{name}.videoTimeline"), capacities.video_frames),
+                queue_state(format!("{name}.audioTimeline"), capacities.audio_blocks),
             ]);
         }
-        queues.extend([
-            queue_state("program.videoEncode", capacities.video_frames),
-            queue_state("program.audioEncode", capacities.audio_blocks),
-            queue_state("program.output", capacities.encoded_messages),
-        ]);
+        queues.push(queue_state("program.output", capacities.encoded_messages));
         Self {
             pipeline: config.metadata.name.clone(),
             started: Instant::now(),
+            running: true,
             input_count,
             director: Director::new(
                 config.director_policy.clone(),
@@ -247,7 +248,7 @@ impl Controller {
         let active = self.director.active_input();
         PipelineRuntimeState {
             pipeline: self.pipeline.clone(),
-            running: true,
+            running: self.running,
             active_input: active,
             active_name: self.cameras[active].name.clone(),
             mode: if self.input_count == 1 {
@@ -366,6 +367,85 @@ impl Controller {
         self.input_states[index] = update;
         self.tick();
     }
+
+    fn observe_queue(&mut self, name: &str, depth: usize) {
+        if let Some(queue) = self.queues.iter_mut().find(|queue| queue.name == name) {
+            queue.depth = depth.min(queue.capacity);
+            queue.high_watermark = queue.high_watermark.max(queue.depth);
+        }
+    }
+
+    fn record_decoded(&mut self, codec: CodecId, count: usize) {
+        let count = count as u64;
+        match codec {
+            CodecId::H264 => {
+                self.input_states[0].codec.video_decoded_frames = self.input_states[0]
+                    .codec
+                    .video_decoded_frames
+                    .saturating_add(count);
+            }
+            CodecId::AacLc => {
+                self.input_states[0].codec.audio_decoded_frames = self.input_states[0]
+                    .codec
+                    .audio_decoded_frames
+                    .saturating_add(count);
+            }
+            CodecId::PcmF32 | CodecId::Unknown(_) => {}
+        }
+    }
+
+    fn record_input_drop(&mut self, codec: CodecId) {
+        match codec {
+            CodecId::H264 => {
+                self.input_states[0].codec.video_dropped_frames = self.input_states[0]
+                    .codec
+                    .video_dropped_frames
+                    .saturating_add(1);
+            }
+            CodecId::AacLc => {
+                self.input_states[0].codec.audio_dropped_frames = self.input_states[0]
+                    .codec
+                    .audio_dropped_frames
+                    .saturating_add(1);
+            }
+            CodecId::PcmF32 | CodecId::Unknown(_) => {}
+        }
+    }
+
+    fn record_encoded(&mut self, codec: CodecId) {
+        match codec {
+            CodecId::H264 => {
+                self.output_state.video_encoded_frames =
+                    self.output_state.video_encoded_frames.saturating_add(1);
+            }
+            CodecId::AacLc => {
+                self.output_state.audio_encoded_frames =
+                    self.output_state.audio_encoded_frames.saturating_add(1);
+            }
+            CodecId::PcmF32 | CodecId::Unknown(_) => {}
+        }
+    }
+
+    fn record_output_drop(&mut self, codec: CodecId) {
+        match codec {
+            CodecId::H264 => {
+                self.output_state.video_dropped_frames =
+                    self.output_state.video_dropped_frames.saturating_add(1);
+            }
+            CodecId::AacLc => {
+                self.output_state.audio_dropped_frames =
+                    self.output_state.audio_dropped_frames.saturating_add(1);
+            }
+            CodecId::PcmF32 | CodecId::Unknown(_) => {}
+        }
+    }
+
+    fn finish(&mut self) {
+        self.running = false;
+        for queue in &mut self.queues {
+            queue.depth = 0;
+        }
+    }
 }
 
 fn queue_state(name: impl Into<String>, capacity: usize) -> QueueRuntimeState {
@@ -404,6 +484,30 @@ impl ControllerHandle {
 
     pub async fn set_input_state(&self, index: usize, update: InputRuntimeState) {
         self.inner.lock().await.set_input_state(index, update);
+    }
+
+    pub(crate) async fn observe_queue(&self, name: &str, depth: usize) {
+        self.inner.lock().await.observe_queue(name, depth);
+    }
+
+    pub(crate) async fn record_decoded(&self, codec: CodecId, count: usize) {
+        self.inner.lock().await.record_decoded(codec, count);
+    }
+
+    pub(crate) async fn record_input_drop(&self, codec: CodecId) {
+        self.inner.lock().await.record_input_drop(codec);
+    }
+
+    pub(crate) async fn record_encoded(&self, codec: CodecId) {
+        self.inner.lock().await.record_encoded(codec);
+    }
+
+    pub(crate) async fn record_output_drop(&self, codec: CodecId) {
+        self.inner.lock().await.record_output_drop(codec);
+    }
+
+    pub(crate) async fn finish(&self) {
+        self.inner.lock().await.finish();
     }
 }
 

@@ -10,10 +10,15 @@ repository.workspace = true
 
 [dependencies]
 aimedia-core = { version = "0.1.0-alpha.1", path = "../aimedia-core" }
+aimedia-mpegts = { version = "0.1.0-alpha.1", path = "../aimedia-mpegts" }
 serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
+
+[dev-dependencies]
+async-trait.workspace = true
+bytes.workspace = true
 
 [lints]
 workspace = true

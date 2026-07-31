@@ -23,10 +23,12 @@
 - libxaac AAC-LC 帧级编码/解码、固定 1024-sample cadence 和 native round-trip；
 - 一到两路输入配置、单路状态、`notApplicable` 控制错误，以及队列/codec/GPU/SRT
   可观测性契约；
+- 可注入后端的单路有界调度器，已用 fake codec/transport 验证 TS 任意分块、独立
+  节目时钟、编码复用、队列水位和受控排空；
 - 确定性导播、音频 DSP、VLM contract、replay、bench、fuzz 和 CPU CI。
 
-当前尚不能完成真实直播闭环。NVDEC/NVENC 帧提交、codec 到 scheduler 的集成以及
-持续的 SRT 数据面仍未接通。
+当前尚不能完成真实直播闭环。生产 SRT/NVDEC/NVENC/libxaac 后端尚未接入调度器，
+NVDEC/NVENC 帧提交以及断流保活也仍未完成。
 
 ## v0.2 Native Single-SRT
 

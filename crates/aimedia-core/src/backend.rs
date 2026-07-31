@@ -142,11 +142,19 @@ pub trait VideoEncoder: Send {
 #[async_trait]
 pub trait AudioDecoder: Send {
     async fn decode(&mut self, packet: MediaPacket) -> Result<Vec<AudioFrame>, BackendError>;
+
+    async fn flush(&mut self) -> Result<Vec<AudioFrame>, BackendError> {
+        Ok(Vec::new())
+    }
 }
 
 #[async_trait]
 pub trait AudioEncoder: Send {
     async fn encode(&mut self, frame: AudioFrame) -> Result<Vec<MediaPacket>, BackendError>;
+
+    async fn flush(&mut self) -> Result<Vec<MediaPacket>, BackendError> {
+        Ok(Vec::new())
+    }
 }
 
 #[async_trait]
