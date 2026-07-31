@@ -26,7 +26,8 @@
 - 48kHz BS.1770 K-weighting 滚动响度估计、增益计算和 80ms 等功率音频切换；
 - clean-room MPEG-TS 流式同步、PSI/PES 重组、PTS 回绕、PAT/PMT/PCR、TS mux、H.264 Annex-B 和 AAC ADTS；
 - 独立节目时钟、队列容量计算、1ms/s 漂移校正和版本化 Unix Socket 控制面；
-- 运行时加载的 libsrt caller/listener/epoll/加密/统计边界和 NVIDIA 环境探测；
+- 运行时加载的 libsrt caller/listener/epoll/加密/统计边界、指数退避重连和 NVIDIA
+  环境探测；
 - libxaac AAC-LC 帧级解码/编码、1024-sample cadence、flush 和 native round-trip；
 - 一到两路输入配置、单路运行状态，以及队列/codec/GPU/SRT 可观测性契约；
 - `probe`、`doctor`、`control`、`run --dry-run`、`run --mock`、`explain`、`replay`、`bench` CLI。

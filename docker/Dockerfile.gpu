@@ -79,7 +79,7 @@ RUN cc -std=c11 -D_POSIX_C_SOURCE=200112L -fPIC -Wall -Wextra -Werror \
 FROM rust-builder AS native-test
 COPY --from=native-builder /opt/native/lib/ /usr/local/lib/
 RUN ldconfig \
-    && cargo test -p aimedia-srt native_caller_listener_loopback_preserves_one_ts_message \
+    && cargo test -p aimedia-srt native_caller_listener_loopback_recovers_after_disconnect \
        -- --ignored --nocapture \
     && cargo test -p aimedia-aac native_round_trip_uses_1024_sample_cadence \
        -- --ignored --nocapture
