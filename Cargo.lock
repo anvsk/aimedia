@@ -35,10 +35,14 @@ dependencies = [
 name = "aimedia-aac"
 version = "0.1.0-alpha.1"
 dependencies = [
+ "aimedia-core",
  "aimedia-mpegts",
+ "async-trait",
+ "bytes",
  "libloading",
  "serde",
  "thiserror",
+ "tokio",
 ]
 
 [[package]]

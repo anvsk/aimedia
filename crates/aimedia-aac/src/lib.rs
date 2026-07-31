@@ -5,7 +5,16 @@
 
 use std::{collections::VecDeque, ffi::c_void, ptr::NonNull, sync::Arc};
 
+use aimedia_core::{
+    Timestamp,
+    backend::{
+        AudioDecoder as CoreAudioDecoder, AudioEncoder as CoreAudioEncoder, AudioFrame,
+        BackendError, CodecId, MediaPacket,
+    },
+};
 use aimedia_mpegts::elementary::parse_adts_frame;
+use async_trait::async_trait;
+use bytes::Bytes;
 use libloading::Library;
 use serde::Serialize;
 use thiserror::Error;
@@ -263,6 +272,20 @@ impl Libxaac {
         AacEncoder::new(Arc::clone(self))
     }
 
+    pub fn audio_decoder(self: &Arc<Self>) -> Result<LibxaacAudioDecoder, AacError> {
+        Ok(LibxaacAudioDecoder {
+            inner: self.decoder()?,
+            timeline: SampleTimeline::default(),
+        })
+    }
+
+    pub fn audio_encoder(self: &Arc<Self>) -> Result<LibxaacAudioEncoder, AacError> {
+        Ok(LibxaacAudioEncoder {
+            inner: self.encoder()?,
+            timeline: SampleTimeline::default(),
+        })
+    }
+
     #[must_use]
     pub fn report(&self) -> &AacProbeReport {
         &self.report
@@ -491,6 +514,173 @@ impl Drop for AacEncoder {
     }
 }
 
+/// `aimedia-core` decoder adapter around the fixed-profile libxaac decoder.
+#[derive(Debug)]
+pub struct LibxaacAudioDecoder {
+    inner: AacDecoder,
+    timeline: SampleTimeline,
+}
+
+#[async_trait]
+impl CoreAudioDecoder for LibxaacAudioDecoder {
+    async fn decode(&mut self, packet: MediaPacket) -> Result<Vec<AudioFrame>, BackendError> {
+        if packet.codec != CodecId::AacLc {
+            return Err(BackendError::Unsupported(format!(
+                "libxaac decoder requires AAC-LC packets, got {:?}",
+                packet.codec
+            )));
+        }
+        if packet.discontinuity {
+            self.inner =
+                AacDecoder::new(Arc::clone(&self.inner.library)).map_err(map_backend_error)?;
+            self.timeline.reset();
+        }
+        self.timeline.anchor(packet.pts);
+        let decoded = self
+            .inner
+            .decode_adts(&packet.data)
+            .map_err(map_backend_error)?;
+        decoded
+            .map(|frame| self.audio_frame(frame))
+            .transpose()
+            .map(|frame| frame.into_iter().collect())
+    }
+
+    async fn flush(&mut self) -> Result<Vec<AudioFrame>, BackendError> {
+        let mut frames = Vec::new();
+        while let Some(frame) = self.inner.flush().map_err(map_backend_error)? {
+            frames.push(self.audio_frame(frame)?);
+        }
+        Ok(frames)
+    }
+}
+
+impl LibxaacAudioDecoder {
+    fn audio_frame(&mut self, frame: DecodedPcm) -> Result<AudioFrame, BackendError> {
+        Ok(AudioFrame {
+            pts: self.timeline.next(SAMPLES_PER_CHANNEL)?,
+            sample_rate: frame.sample_rate,
+            channels: frame.channels,
+            interleaved: frame.interleaved,
+        })
+    }
+}
+
+/// `aimedia-core` encoder adapter around the fixed-profile libxaac encoder.
+#[derive(Debug)]
+pub struct LibxaacAudioEncoder {
+    inner: AacEncoder,
+    timeline: SampleTimeline,
+}
+
+#[async_trait]
+impl CoreAudioEncoder for LibxaacAudioEncoder {
+    async fn encode(&mut self, frame: AudioFrame) -> Result<Vec<MediaPacket>, BackendError> {
+        if frame.sample_rate != SAMPLE_RATE_HZ
+            || frame.channels != CHANNELS
+            || frame.interleaved.len() % usize::from(CHANNELS) != 0
+        {
+            return Err(BackendError::Unsupported(
+                "libxaac encoder requires interleaved f32 PCM at 48000 Hz with two channels"
+                    .to_owned(),
+            ));
+        }
+        self.timeline.anchor(frame.pts);
+        let packets = self
+            .inner
+            .encode_interleaved(&frame.interleaved)
+            .map_err(map_backend_error)?;
+        self.media_packets(packets)
+    }
+
+    async fn flush(&mut self) -> Result<Vec<MediaPacket>, BackendError> {
+        let packets = self.inner.flush().map_err(map_backend_error)?;
+        self.media_packets(packets)
+    }
+}
+
+impl LibxaacAudioEncoder {
+    fn media_packets(&mut self, packets: Vec<Vec<u8>>) -> Result<Vec<MediaPacket>, BackendError> {
+        packets
+            .into_iter()
+            .map(|data| {
+                let pts = self.timeline.next(SAMPLES_PER_CHANNEL)?;
+                Ok(MediaPacket {
+                    stream_id: 0,
+                    codec: CodecId::AacLc,
+                    pts,
+                    dts: Some(pts),
+                    duration: Some(sample_duration(pts.timescale, SAMPLES_PER_CHANNEL)),
+                    keyframe: true,
+                    discontinuity: false,
+                    data: Bytes::from(data),
+                })
+            })
+            .collect()
+    }
+}
+
+#[derive(Debug, Default)]
+struct SampleTimeline {
+    anchor: Option<Timestamp>,
+    emitted_samples: u64,
+}
+
+impl SampleTimeline {
+    fn anchor(&mut self, timestamp: Timestamp) {
+        self.anchor.get_or_insert(timestamp);
+    }
+
+    fn next(&mut self, samples: usize) -> Result<Timestamp, BackendError> {
+        let anchor = self.anchor.ok_or_else(|| {
+            BackendError::Processing("AAC output was produced before a timestamp anchor".to_owned())
+        })?;
+        let offset = i128::from(self.emitted_samples) * i128::from(anchor.timescale)
+            / i128::from(SAMPLE_RATE_HZ);
+        self.emitted_samples = self
+            .emitted_samples
+            .saturating_add(u64::try_from(samples).unwrap_or(u64::MAX));
+        Ok(Timestamp::new(
+            (i128::from(anchor.ticks) + offset).clamp(i128::from(i64::MIN), i128::from(i64::MAX))
+                as i64,
+            anchor.timescale,
+        ))
+    }
+
+    fn reset(&mut self) {
+        self.anchor = None;
+        self.emitted_samples = 0;
+    }
+}
+
+fn sample_duration(timescale: u32, samples: usize) -> Timestamp {
+    let ticks = u128::try_from(samples)
+        .unwrap_or(u128::MAX)
+        .saturating_mul(u128::from(timescale))
+        / u128::from(SAMPLE_RATE_HZ);
+    Timestamp::new(
+        i64::try_from(ticks.min(i128::from(i64::MAX) as u128)).unwrap_or(i64::MAX),
+        timescale,
+    )
+}
+
+fn map_backend_error(error: AacError) -> BackendError {
+    let message = error.to_string();
+    match error {
+        AacError::Library { .. } | AacError::Symbol { .. } | AacError::Initialization { .. } => {
+            BackendError::Unavailable(message)
+        }
+        AacError::UnsupportedProfile | AacError::Format { .. } => {
+            BackendError::Unsupported(message)
+        }
+        AacError::InvalidAdts(_)
+        | AacError::CorruptData { .. }
+        | AacError::Processing { .. }
+        | AacError::InputLimit { .. }
+        | AacError::CompressedInputLimit { .. } => BackendError::Processing(message),
+    }
+}
+
 fn decode_result(
     status: i32,
     native_code: i32,
@@ -613,7 +803,15 @@ unsafe fn symbol<T: Copy>(
 
 #[cfg(test)]
 mod tests {
-    use super::{AacError, INTERLEAVED_SAMPLES_PER_FRAME, Libxaac, validate_adts};
+    use aimedia_core::{
+        Timestamp,
+        backend::{AudioDecoder as CoreAudioDecoder, AudioEncoder as CoreAudioEncoder, AudioFrame},
+    };
+
+    use super::{
+        AacError, INTERLEAVED_SAMPLES_PER_FRAME, Libxaac, SAMPLE_RATE_HZ, SAMPLES_PER_CHANNEL,
+        SampleTimeline, validate_adts,
+    };
 
     #[test]
     fn validates_the_only_alpha_audio_profile() {
@@ -634,52 +832,102 @@ mod tests {
     }
 
     #[test]
+    fn sample_timeline_has_exact_1024_sample_cadence() {
+        let mut timeline = SampleTimeline::default();
+        timeline.anchor(Timestamp::new(90_000, 90_000));
+        let points: Vec<i64> = (0..1_001)
+            .map(|_| {
+                timeline
+                    .next(SAMPLES_PER_CHANNEL)
+                    .expect("timeline has an anchor")
+                    .ticks
+            })
+            .collect();
+        assert_eq!(points[0], 90_000);
+        assert_eq!(points[1], 91_920);
+        assert_eq!(points[1_000], 2_010_000);
+        assert!(points.windows(2).all(|pair| pair[0] < pair[1]));
+    }
+
+    #[test]
     #[ignore = "requires the pinned libxaac libraries and aimedia native bridge"]
     fn native_round_trip_uses_1024_sample_cadence() {
         let library = Libxaac::load().expect("load native codec");
-        let mut encoder = library.encoder().expect("create encoder");
-        let mut decoder = library.decoder().expect("create decoder");
-        let mut decoded = Vec::new();
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("build test runtime");
+        runtime.block_on(async move {
+            let mut encoder = library.audio_encoder().expect("create encoder adapter");
+            let mut decoder = library.audio_decoder().expect("create decoder adapter");
+            let mut encoded = Vec::new();
 
-        for frame_index in 0..4 {
-            let mut pcm = Vec::with_capacity(INTERLEAVED_SAMPLES_PER_FRAME);
-            for sample in 0..INTERLEAVED_SAMPLES_PER_FRAME / 2 {
-                let phase = ((frame_index * 1_024 + sample) as f32 * 440.0 * std::f32::consts::TAU
-                    / 48_000.0)
-                    .sin()
-                    * 0.2;
-                pcm.extend([phase, phase]);
-            }
-            for adts in encoder
-                .encode_interleaved(&pcm)
-                .expect("encode one PCM frame")
-            {
-                if let Some(frame) = decoder.decode_adts(&adts).expect("decode ADTS") {
-                    decoded.push(frame);
+            for frame_index in 0..4 {
+                let mut pcm = Vec::with_capacity(INTERLEAVED_SAMPLES_PER_FRAME);
+                for sample in 0..SAMPLES_PER_CHANNEL {
+                    let phase = ((frame_index * SAMPLES_PER_CHANNEL + sample) as f32
+                        * 440.0
+                        * std::f32::consts::TAU
+                        / SAMPLE_RATE_HZ as f32)
+                        .sin()
+                        * 0.2;
+                    pcm.extend([phase, phase]);
                 }
+                encoded.extend(
+                    CoreAudioEncoder::encode(
+                        &mut encoder,
+                        AudioFrame {
+                            pts: Timestamp::new(90_000 + frame_index as i64 * 1_920, 90_000),
+                            sample_rate: SAMPLE_RATE_HZ,
+                            channels: 2,
+                            interleaved: pcm,
+                        },
+                    )
+                    .await
+                    .expect("encode one PCM frame"),
+                );
             }
-        }
-        for adts in encoder.flush().expect("flush encoder") {
-            if let Some(frame) = decoder.decode_adts(&adts).expect("decode flushed ADTS") {
-                decoded.push(frame);
-            }
-        }
-        if let Some(frame) = decoder.flush().expect("flush decoder") {
-            decoded.push(frame);
-        }
+            encoded.extend(
+                CoreAudioEncoder::flush(&mut encoder)
+                    .await
+                    .expect("flush encoder"),
+            );
+            assert!(!encoded.is_empty(), "no encoded packets");
+            assert_eq!(encoded[0].pts, Timestamp::new(90_000, 90_000));
+            assert!(encoded.windows(2).all(|pair| pair[0].pts < pair[1].pts));
+            assert!(
+                encoded
+                    .iter()
+                    .all(|packet| { packet.duration == Some(Timestamp::new(1_920, 90_000)) })
+            );
 
-        let decoded_shapes: Vec<_> = decoded
-            .iter()
-            .map(|frame| (frame.interleaved.len(), frame.sample_rate, frame.channels))
-            .collect();
-        assert!(!decoded.is_empty(), "no decoded frames");
-        assert!(
-            decoded.iter().all(|frame| {
-                frame.interleaved.len() == INTERLEAVED_SAMPLES_PER_FRAME
-                    && frame.sample_rate == 48_000
-                    && frame.channels == 2
-            }),
-            "decoded frame shapes: {decoded_shapes:?}"
-        );
+            let mut decoded = Vec::new();
+            for packet in encoded {
+                decoded.extend(
+                    CoreAudioDecoder::decode(&mut decoder, packet)
+                        .await
+                        .expect("decode ADTS packet"),
+                );
+            }
+            decoded.extend(
+                CoreAudioDecoder::flush(&mut decoder)
+                    .await
+                    .expect("flush decoder"),
+            );
+
+            let decoded_shapes: Vec<_> = decoded
+                .iter()
+                .map(|frame| (frame.interleaved.len(), frame.sample_rate, frame.channels))
+                .collect();
+            assert!(!decoded.is_empty(), "no decoded frames");
+            assert!(
+                decoded.iter().all(|frame| {
+                    frame.interleaved.len() == INTERLEAVED_SAMPLES_PER_FRAME
+                        && frame.sample_rate == SAMPLE_RATE_HZ
+                        && frame.channels == 2
+                }),
+                "decoded frame shapes: {decoded_shapes:?}"
+            );
+            assert!(decoded.windows(2).all(|pair| pair[0].pts < pair[1].pts));
+        });
     }
 }
