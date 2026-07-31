@@ -6,7 +6,10 @@
 [![Fuzz](https://github.com/anvsk/aimedia/actions/workflows/fuzz.yml/badge.svg)](https://github.com/anvsk/aimedia/actions/workflows/fuzz.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-`aimedia` 是一个面向直播平台和 AI 应用开发者的开源、AI 原生双机位导播引擎。长期目标是在明确的支持矩阵内逐步替代 FFmpeg，而不是以未完成的“全格式兼容”作为宣传。
+`aimedia` 是一个面向直播开发者和集成商的开源、AI 原生制作与发布引擎。它接收
+摄像机或远程贡献流，完成导播、音频处理和编码，再把连续节目发布到直播平台或
+直播云。长期目标是在明确的市场工作流内逐步替代 FFmpeg，而不是追求未完成的
+“全格式兼容”。
 
 > 开发预览：流式 TS、SRT adapter、节目时钟和本机控制面已经进入第二阶段开发；NVDEC/NVENC、libxaac 帧处理和完整实时数据面尚未闭环。项目名是工作名，公开品牌使用前仍需完成名称与商标检索。
 
@@ -78,6 +81,8 @@ cargo fuzz run config
 
 - [中文快速入门](docs/getting-started.zh-CN.md)
 - [用户故事与验收场景](docs/user-stories.md)
+- [中国大陆与海外市场支持策略](docs/market-support.md)
+- [平台预设契约](docs/platform-presets.md)
 - [直播媒体术语表](docs/glossary.md)
 - [为什么采用这套架构](docs/design-rationale.md)
 - [架构说明](docs/architecture.md)、[路线图](docs/roadmap.md)和[支持矩阵](docs/support-matrix.md)
