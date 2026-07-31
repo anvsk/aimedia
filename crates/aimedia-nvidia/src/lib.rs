@@ -17,6 +17,48 @@ pub const VIDEO_CODEC_SDK_MAJOR: u32 = 13;
 pub const VIDEO_CODEC_SDK_MINOR: u32 = 0;
 const REQUIRED_NVENC_API_VERSION_RAW: u32 = (VIDEO_CODEC_SDK_MAJOR << 4) | VIDEO_CODEC_SDK_MINOR;
 
+#[cfg(feature = "video-codec-sdk")]
+#[allow(
+    clippy::all,
+    non_camel_case_types,
+    non_snake_case,
+    non_upper_case_globals,
+    unsafe_op_in_unsafe_fn
+)]
+mod sdk_ffi {
+    include!(concat!(env!("OUT_DIR"), "/video_codec_sdk.rs"));
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SdkBuildManifest {
+    pub bindings_enabled: bool,
+    pub version: Option<&'static str>,
+    pub header_fingerprint_sha256: Option<&'static str>,
+}
+
+impl SdkBuildManifest {
+    #[must_use]
+    pub const fn current() -> Self {
+        #[cfg(feature = "video-codec-sdk")]
+        {
+            Self {
+                bindings_enabled: true,
+                version: Some(env!("AIMEDIA_VIDEO_CODEC_SDK_VERSION")),
+                header_fingerprint_sha256: Some(env!("AIMEDIA_VIDEO_CODEC_SDK_FINGERPRINT")),
+            }
+        }
+        #[cfg(not(feature = "video-codec-sdk"))]
+        {
+            Self {
+                bindings_enabled: false,
+                version: None,
+                header_fingerprint_sha256: None,
+            }
+        }
+    }
+}
+
 type CuInit = unsafe extern "C" fn(u32) -> i32;
 type CuDriverGetVersion = unsafe extern "C" fn(*mut i32) -> i32;
 type NvEncodeApiGetMaxSupportedVersion = unsafe extern "C" fn(*mut u32) -> i32;
@@ -43,6 +85,7 @@ pub enum NvidiaError {
 #[serde(rename_all = "camelCase")]
 pub struct NvidiaProbeReport {
     pub target_sdk_version: String,
+    pub sdk_build: SdkBuildManifest,
     pub cuda_driver_version: i32,
     pub nvenc_max_api_version_raw: u32,
     pub cuda_library: &'static str,
@@ -142,6 +185,7 @@ impl NvidiaLibraries {
             _nvenc: nvenc,
             report: NvidiaProbeReport {
                 target_sdk_version: format!("{VIDEO_CODEC_SDK_MAJOR}.{VIDEO_CODEC_SDK_MINOR}"),
+                sdk_build: SdkBuildManifest::current(),
                 cuda_driver_version: driver_version,
                 nvenc_max_api_version_raw: nvenc_version,
                 cuda_library: cuda_name,

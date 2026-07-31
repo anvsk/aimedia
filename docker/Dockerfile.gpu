@@ -1,7 +1,24 @@
+FROM nvidia/cuda:12.9.1-devel-ubuntu24.04 AS cuda-headers
+
 FROM rust:1.88-bookworm AS rust-builder
 WORKDIR /src
 COPY . .
 RUN cargo build --locked --release -p aimedia
+
+FROM rust-builder AS rust-builder-sdk
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends clang libclang-dev \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=video_codec_sdk /Interface/nvEncodeAPI.h /opt/video-codec-sdk/Interface/nvEncodeAPI.h
+COPY --from=video_codec_sdk /Interface/nvcuvid.h /opt/video-codec-sdk/Interface/nvcuvid.h
+COPY --from=video_codec_sdk /Interface/cuviddec.h /opt/video-codec-sdk/Interface/cuviddec.h
+COPY --from=cuda-headers /usr/local/cuda/include/ /opt/cuda/include/
+ARG VIDEO_CODEC_SDK_EXPECTED_SHA256
+RUN AIMEDIA_VIDEO_CODEC_SDK_PATH=/opt/video-codec-sdk \
+    AIMEDIA_CUDA_INCLUDE_PATH=/opt/cuda/include \
+    AIMEDIA_VIDEO_CODEC_SDK_EXPECTED_SHA256="${VIDEO_CODEC_SDK_EXPECTED_SHA256}" \
+    cargo build --locked --release -p aimedia \
+      --features aimedia-nvidia/video-codec-sdk
 
 FROM debian:bookworm AS native-builder
 ARG SRT_REF=v1.5.5
@@ -47,7 +64,12 @@ RUN ldconfig \
     && cargo test -p aimedia-srt native_caller_listener_loopback_preserves_one_ts_message \
        -- --ignored --nocapture
 
-FROM debian:bookworm-slim
+FROM rust-builder-sdk AS sdk-build-test
+RUN AIMEDIA_VIDEO_CODEC_SDK_PATH=/opt/video-codec-sdk \
+    AIMEDIA_CUDA_INCLUDE_PATH=/opt/cuda/include \
+    cargo test --locked -p aimedia-nvidia --features video-codec-sdk
+
+FROM debian:bookworm-slim AS runtime-base
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates libssl3 libstdc++6 \
     && rm -rf /var/lib/apt/lists/* \
@@ -55,7 +77,12 @@ RUN apt-get update \
     && mkdir -p /run/aimedia \
     && chown aimedia:aimedia /run/aimedia
 COPY --from=native-builder /opt/native/lib/ /usr/local/lib/
-COPY --from=rust-builder /src/target/release/aimedia /usr/local/bin/aimedia
 RUN ldconfig
 USER 10001
 ENTRYPOINT ["aimedia"]
+
+FROM runtime-base AS probe-runtime
+COPY --from=rust-builder /src/target/release/aimedia /usr/local/bin/aimedia
+
+FROM runtime-base AS sdk-runtime
+COPY --from=rust-builder-sdk /src/target/release/aimedia /usr/local/bin/aimedia

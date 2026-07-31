@@ -7,18 +7,49 @@ docker build -t aimedia:core .
 docker run --rm aimedia:core doctor --json
 ```
 
-GPU 镜像构建 libsrt 1.5.5 和固定提交的 Android libxaac，并在运行时使用宿主机由
-NVIDIA Container Toolkit 注入的驱动库：
+GPU probe 镜像构建 libsrt 1.5.5 和固定提交的 Android libxaac，并在运行时使用
+宿主机由 NVIDIA Container Toolkit 注入的驱动库。该目标不生成 proprietary SDK
+bindings：
 
 ```bash
-docker build -f docker/Dockerfile.gpu -t aimedia:gpu .
+docker build -f docker/Dockerfile.gpu --target probe-runtime -t aimedia:gpu-probe .
 docker run --rm --gpus all \
   -e NVIDIA_DRIVER_CAPABILITIES=compute,utility,video \
-  aimedia:gpu doctor --strict
+  aimedia:gpu-probe doctor --strict
 ```
 
 `doctor --strict` 通过只表示 libsrt、CUDA/NVDEC/NVENC driver libraries 和 libxaac
 公共符号可用；在支持矩阵升级前，它不代表 codec 帧处理已经完成。
 
-Video Codec SDK 13.0 的 proprietary archive 不提交到仓库。后续 NVDEC/NVENC frame
-binding 构建会要求通过 BuildKit build context 提供 SDK，并在构建脚本中验证版本和哈希。
+## Video Codec SDK 13.0 named context
+
+Video Codec SDK 13.0 的 proprietary archive 和 headers 不提交到仓库。用户必须从
+NVIDIA 官方渠道接受许可证、下载并解压 SDK。context 根目录必须直接包含
+`Interface/nvEncodeAPI.h`、`Interface/nvcuvid.h` 和 `Interface/cuviddec.h`。
+
+PowerShell 示例：
+
+```powershell
+docker buildx build `
+  -f docker/Dockerfile.gpu `
+  --build-context video_codec_sdk='C:\sdk\Video_Codec_SDK_13.0' `
+  --target sdk-runtime `
+  -t aimedia:gpu-sdk .
+```
+
+构建脚本检查 `NVENCAPI_MAJOR_VERSION=13` 和 `NVENCAPI_MINOR_VERSION=0`，对三个
+headers 的文件名与内容计算组合 SHA-256，并把版本和 fingerprint 编译进
+`doctor --json` 报告。首次构建会在日志中显示 fingerprint；受控发行可在后续构建
+中锁定它：
+
+```powershell
+docker buildx build `
+  -f docker/Dockerfile.gpu `
+  --build-context video_codec_sdk='C:\sdk\Video_Codec_SDK_13.0' `
+  --build-arg VIDEO_CODEC_SDK_EXPECTED_SHA256='<64-hex-fingerprint>' `
+  --target sdk-build-test .
+```
+
+SDK headers 和 CUDA headers 只存在于 builder stage，不进入运行镜像。未传 named
+context 时，`sdk-runtime` 和 `sdk-build-test` 必须在构建阶段明确失败；普通 CPU CI
+以及 `probe-runtime` 不需要 SDK。
