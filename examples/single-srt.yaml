@@ -1,0 +1,23 @@
+apiVersion: aimedia/v1alpha1
+kind: DirectorPipeline
+metadata:
+  name: single-srt-demo
+
+inputs:
+  - name: program
+    role: custom
+    uri: srt://0.0.0.0:9001
+    srt:
+      mode: listener
+      latencyMs: 120
+
+output:
+  uri: srt://127.0.0.1:10000
+  srt:
+    mode: caller
+    latencyMs: 120
+
+sync:
+  masterInput: 0
+  bufferMs: 1000
+  maxSkewMs: 80

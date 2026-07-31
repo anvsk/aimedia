@@ -73,14 +73,18 @@ impl PipelineConfig {
         if self.metadata.name.trim().is_empty() {
             errors.push("metadata.name must not be empty".to_owned());
         }
-        if self.inputs.len() != 2 {
+        if !(1..=2).contains(&self.inputs.len()) {
             errors.push(format!(
-                "exactly two inputs are required for v1alpha1, got {}",
+                "one or two inputs are required for v1alpha1, got {}",
                 self.inputs.len()
             ));
         }
-        if self.sync.master_input > 1 {
-            errors.push("sync.masterInput must be 0 or 1".to_owned());
+        if self.sync.master_input >= self.inputs.len() {
+            errors.push(format!(
+                "sync.masterInput must reference a configured input, got {} for {} inputs",
+                self.sync.master_input,
+                self.inputs.len()
+            ));
         }
 
         let mut names = HashSet::new();
@@ -845,6 +849,16 @@ mod tests {
         assert_eq!(config.inputs.len(), 2);
         assert_eq!(config.sync.max_skew_ms, 80);
         assert_eq!(config.media.video.gop_ms, 1_000);
+    }
+
+    #[test]
+    fn accepts_one_input_and_rejects_a_missing_master() {
+        let yaml = include_str!("../../../examples/single-srt.yaml");
+        let config = PipelineConfig::from_yaml(yaml).expect("single-input configuration is valid");
+        assert_eq!(config.inputs.len(), 1);
+
+        let invalid = yaml.replace("masterInput: 0", "masterInput: 1");
+        assert!(PipelineConfig::from_yaml(&invalid).is_err());
     }
 
     #[test]

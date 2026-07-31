@@ -13,7 +13,7 @@ use aimedia_core::{
 };
 use aimedia_mpegts::{DemuxEvent, ProgramMap, StreamDemuxer, probe_path};
 use aimedia_nvidia::NvidiaLibraries;
-use aimedia_runtime::{run_mock_pipeline, send_control_request};
+use aimedia_runtime::{QueueCapacities, run_mock_pipeline, send_control_request};
 use aimedia_srt::{Endpoint, SrtTransport, probe_version as probe_srt_version};
 use anyhow::{Context, Result, bail};
 use clap::{ArgAction, Parser, Subcommand, ValueEnum};
@@ -411,11 +411,18 @@ async fn command_run(path: &Path, dry_run: bool, mock: bool) -> Result<()> {
             .await
             .context("mock pipeline failed");
     }
+    if config.inputs.len() == 2 {
+        bail!(
+            "dualDataPlanePending: two-input native execution is scheduled for v0.3; use a \
+             single-input configuration for the v0.2 data plane, or `--mock` for control testing"
+        );
+    }
     bail!(
-        "native live execution is not complete in this build: the streaming MPEG-TS and libsrt \
-         layers and libxaac frame codec are present, but NVDEC/NVENC frame processing is not \
-         linked into the scheduler; use `aimedia run --mock` to exercise the program clock and control socket, or \
-         `aimedia run --dry-run` to validate the graph"
+        "nativeVideoBackendPending: the single-input contract, streaming MPEG-TS, libsrt, and \
+         libxaac frame codec are present, but NVDEC/NVENC frame processing is not implemented in \
+         this build; a GPU feature build also requires a user-supplied Video Codec SDK 13.0; use \
+         `aimedia run --mock` to exercise the program clock and control socket, or `aimedia run \
+         --dry-run` to validate the graph"
     )
 }
 
@@ -481,18 +488,30 @@ fn command_explain(path: &Path, output_json: bool) -> Result<()> {
         println!("{}", serde_json::to_string_pretty(&graph)?);
     } else {
         println!("pipeline: {}", config.metadata.name);
-        println!("profile: 2x SRT/MPEG-TS H.264+AAC -> director -> 1x SRT/MPEG-TS H.264+AAC");
+        println!(
+            "profile: {}x SRT/MPEG-TS H.264+AAC -> {} -> 1x SRT/MPEG-TS H.264+AAC",
+            config.inputs.len(),
+            if config.inputs.len() == 1 {
+                "program clock"
+            } else {
+                "director"
+            }
+        );
         println!(
             "sync: master input {}, buffer {}ms, max skew {}ms",
             config.sync.master_input, config.sync.buffer_ms, config.sync.max_skew_ms
         );
-        println!(
-            "director: min shot {}ms, margin {:.2}, candidate hold {}ms, cooldown {}ms",
-            config.director_policy.min_shot_ms,
-            config.director_policy.score_margin,
-            config.director_policy.candidate_hold_ms,
-            config.director_policy.cooldown_ms
-        );
+        if config.inputs.len() == 2 {
+            println!(
+                "director: min shot {}ms, margin {:.2}, candidate hold {}ms, cooldown {}ms",
+                config.director_policy.min_shot_ms,
+                config.director_policy.score_margin,
+                config.director_policy.candidate_hold_ms,
+                config.director_policy.cooldown_ms
+            );
+        } else {
+            println!("director: not applicable to a single-input pipeline");
+        }
         println!(
             "VLM: {:?}, weight {:.2}, deadline {}ms; never on the media hot path",
             config.vlm_advisor.mode, config.vlm_advisor.weight, config.vlm_advisor.deadline_ms
@@ -637,74 +656,100 @@ fn execute_replay(
 }
 
 fn explain_graph(config: &PipelineConfig) -> Value {
-    json!({
-        "apiVersion": config.api_version,
-        "pipeline": config.metadata.name,
-        "hotPathWaitsForVlm": false,
-        "boundedQueues": true,
-        "nodes": [
-            {
-                "id": "srt-input-a",
+    let capacities = QueueCapacities::from_config(config);
+    let pipeline_mode = if config.inputs.len() == 1 {
+        "single"
+    } else {
+        "dual"
+    };
+    let mut nodes = Vec::new();
+    for (index, input) in config.inputs.iter().enumerate() {
+        nodes.extend([
+            json!({
+                "id": format!("srt-input-{index}"),
+                "input": input.name,
                 "memory": "CPU",
+                "queueCapacity": capacities.transport_messages,
                 "description": "runtime-loaded libsrt 1.5 caller/listener adapter"
-            },
-            {
-                "id": "srt-input-b",
+            }),
+            json!({
+                "id": format!("mpegts-demux-{index}"),
+                "input": input.name,
                 "memory": "CPU",
-                "description": "runtime-loaded libsrt 1.5 caller/listener adapter"
-            },
-            {
-                "id": "mpegts-demux",
-                "memory": "CPU",
-                "description": "streaming sync, PSI/PES reassembly, PTS unwrap and clean-room mux"
-            },
-            {
-                "id": "nvdec-a+b",
+                "queueCapacity": capacities.transport_messages,
+                "description": "streaming sync, PSI/PES reassembly and PTS unwrap"
+            }),
+            json!({
+                "id": format!("nvdec-{index}"),
+                "input": input.name,
                 "memory": "CUDA",
-                "description": "SDK 13.0 driver probe and RAII surfaces; frame submission pending"
-            },
-            {
+                "queueCapacity": capacities.video_frames,
+                "description": "SDK 13.0 build boundary and RAII surfaces; frame submission pending"
+            }),
+            json!({
+                "id": format!("aac-decode-{index}"),
+                "input": input.name,
+                "memory": "CPU",
+                "queueCapacity": capacities.audio_blocks,
+                "description": "native libxaac AAC-LC to fixed-cadence f32 PCM"
+            }),
+        ]);
+    }
+    if config.inputs.len() == 2 {
+        nodes.extend([
+            json!({
                 "id": "sync-buffer",
                 "memory": "CPU/CUDA",
+                "queueCapacity": capacities.video_frames,
                 "description": format!(
                     "fixed {}ms buffer; auto pause above {}ms skew",
                     config.sync.buffer_ms, config.sync.max_skew_ms
                 )
-            },
-            {
-                "id": "fast-analyzers",
-                "memory": "CPU/CUDA",
-                "description": "contracts only; realtime analyzers are outside Phase 2"
-            },
-            {
-                "id": "vlm-advisor",
-                "memory": "side-channel",
-                "description": format!(
-                    "{:?}; {}ms deadline; {:.0}% maximum score weight",
-                    config.vlm_advisor.mode,
-                    config.vlm_advisor.deadline_ms,
-                    config.vlm_advisor.weight * 100.0
-                )
-            },
-            {
+            }),
+            json!({
                 "id": "director",
                 "memory": "CPU",
                 "description": "deterministic state machine; manual take and health gates"
-            },
-            {
+            }),
+            json!({
                 "id": "audio-switch",
                 "memory": "CPU",
                 "description": format!(
                     "{}ms equal-power fade to {:.1} LUFS with 4x true-peak limiting",
                     config.audio_switch.crossfade_ms, config.audio_switch.target_lufs
                 )
-            },
-            {
-                "id": "nvenc+mpegts+srt",
-                "memory": "CUDA/CPU",
-                "description": "program clock and TS/SRT ready; codec frame submission pending"
-            }
-        ],
+            }),
+        ]);
+    }
+    nodes.extend([
+        json!({
+            "id": "nvenc",
+            "memory": "CUDA",
+            "queueCapacity": capacities.video_frames,
+            "description": "H.264 frame submission pending"
+        }),
+        json!({
+            "id": "aac-encode",
+            "memory": "CPU",
+            "queueCapacity": capacities.audio_blocks,
+            "description": "native libxaac f32 PCM to AAC-LC ADTS"
+        }),
+        json!({
+            "id": "mpegts-srt-output",
+            "memory": "CPU",
+            "queueCapacity": capacities.encoded_messages,
+            "description": "independent program clock, clean-room TS mux and bounded SRT output"
+        }),
+    ]);
+
+    json!({
+        "apiVersion": config.api_version,
+        "pipeline": config.metadata.name,
+        "mode": pipeline_mode,
+        "inputCount": config.inputs.len(),
+        "hotPathWaitsForVlm": false,
+        "boundedQueues": true,
+        "nodes": nodes,
         "nativeBackendReady": false,
         "implementedNow": [
             "config validation",

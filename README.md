@@ -11,7 +11,9 @@
 直播云。长期目标是在明确的市场工作流内逐步替代 FFmpeg，而不是追求未完成的
 “全格式兼容”。
 
-> 开发预览：流式 TS、SRT adapter、节目时钟和本机控制面已经进入第二阶段开发；NVDEC/NVENC、libxaac 帧处理和完整实时数据面尚未闭环。项目名是工作名，公开品牌使用前仍需完成名称与商标检索。
+> 开发预览：流式 TS、SRT adapter、libxaac 帧处理、节目时钟和本机控制面已经进入
+> 第二阶段开发；NVDEC/NVENC 帧提交和完整实时数据面尚未闭环。项目名是工作名，
+> 公开品牌使用前仍需完成名称与商标检索。
 
 ## 当前状态
 
@@ -24,7 +26,9 @@
 - 48kHz BS.1770 K-weighting 滚动响度估计、增益计算和 80ms 等功率音频切换；
 - clean-room MPEG-TS 流式同步、PSI/PES 重组、PTS 回绕、PAT/PMT/PCR、TS mux、H.264 Annex-B 和 AAC ADTS；
 - 独立节目时钟、队列容量计算、1ms/s 漂移校正和版本化 Unix Socket 控制面；
-- 运行时加载的 libsrt caller/listener/epoll/加密/统计边界，以及 NVIDIA/libxaac 环境探测；
+- 运行时加载的 libsrt caller/listener/epoll/加密/统计边界和 NVIDIA 环境探测；
+- libxaac AAC-LC 帧级解码/编码、1024-sample cadence、flush 和 native round-trip；
+- 一到两路输入配置、单路运行状态，以及队列/codec/GPU/SRT 可观测性契约；
 - `probe`、`doctor`、`control`、`run --dry-run`、`run --mock`、`explain`、`replay`、`bench` CLI。
 - MPEG-TS、H.264/AAC elementary stream 和配置协议的 Linux fuzz 入口。
 
@@ -32,7 +36,7 @@
 
 - SRT 与 codec 串接后的持续节目输出；
 - NVDEC/NVENC 帧提交和 GPU surface copy；
-- libxaac 实际解码与编码；
+- codec、节目时钟、mux 和 SRT 之间的持续调度与重连；
 - Silero/视觉 ONNX 分析器；
 - native codec 帧级 API 和动态插件函数表。
 
@@ -44,6 +48,7 @@
 
 ```bash
 cargo run -p aimedia -- explain -f examples/director.yaml
+cargo run -p aimedia -- explain -f examples/single-srt.yaml --json
 cargo run -p aimedia -- doctor --json
 cargo run -p aimedia -- run -f examples/director.yaml --dry-run
 cargo run -p aimedia -- run -f examples/director.yaml --mock
@@ -54,9 +59,9 @@ cargo run -p aimedia -- probe sample.ts --json
 docker build -t aimedia:dev .
 ```
 
-当前 `run` 不带 `--dry-run` 或 `--mock` 会明确失败，因为 codec 帧处理尚未闭环。`--mock`
-会运行真实节目调度器和 Unix Socket，但不发送媒体。实时能力的完成情况以
-[支持矩阵](docs/support-matrix.md) 为准。
+当前单路原生 `run` 会返回 `nativeVideoBackendPending`，双路会返回
+`dualDataPlanePending`；`--mock` 会运行真实节目调度器和 Unix Socket，但不发送媒体。
+实时能力的完成情况以[支持矩阵](docs/support-matrix.md)为准。
 
 ## 设计原则
 

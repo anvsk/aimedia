@@ -151,6 +151,7 @@ const fn default_hold_ms() -> u64 {
 pub enum ControlErrorCode {
     InvalidRequest,
     UnsupportedVersion,
+    NotApplicable,
     UnknownInput,
     InvalidHold,
     TargetUnavailable,
@@ -206,6 +207,7 @@ impl ControlResponse {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum PipelineMode {
+    Single,
     Automatic,
     Manual,
 }
@@ -234,6 +236,46 @@ pub struct InputRuntimeState {
     pub video_timeline_depth: usize,
     pub audio_timeline_depth: usize,
     pub srt: SrtRuntimeStats,
+    #[serde(default)]
+    pub codec: InputCodecRuntimeStats,
+    #[serde(default)]
+    pub gpu: GpuSurfaceRuntimeStats,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct InputCodecRuntimeStats {
+    pub video_decoded_frames: u64,
+    pub audio_decoded_frames: u64,
+    pub video_dropped_frames: u64,
+    pub audio_dropped_frames: u64,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GpuSurfaceRuntimeStats {
+    pub in_use: usize,
+    pub capacity: usize,
+    pub high_watermark: usize,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct OutputRuntimeState {
+    pub video_encoded_frames: u64,
+    pub audio_encoded_frames: u64,
+    pub video_dropped_frames: u64,
+    pub audio_dropped_frames: u64,
+    pub srt: SrtRuntimeStats,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct QueueRuntimeState {
+    pub name: String,
+    pub depth: usize,
+    pub capacity: usize,
+    pub high_watermark: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -246,7 +288,9 @@ pub struct PipelineRuntimeState {
     pub mode: PipelineMode,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hold_until_ms: Option<u64>,
-    pub inputs: [InputRuntimeState; 2],
+    pub inputs: Vec<InputRuntimeState>,
+    pub output: OutputRuntimeState,
+    pub queues: Vec<QueueRuntimeState>,
     pub last_reason: String,
 }
 
