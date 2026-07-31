@@ -9,6 +9,7 @@ authors.workspace = true
 repository.workspace = true
 
 [dependencies]
+aimedia-mpegts = { version = "0.1.0-alpha.1", path = "../aimedia-mpegts" }
 libloading.workspace = true
 serde.workspace = true
 thiserror.workspace = true

@@ -413,8 +413,8 @@ async fn command_run(path: &Path, dry_run: bool, mock: bool) -> Result<()> {
     }
     bail!(
         "native live execution is not complete in this build: the streaming MPEG-TS and libsrt \
-         layers are present, but NVDEC/NVENC and libxaac frame processing are not linked into the \
-         scheduler; use `aimedia run --mock` to exercise the program clock and control socket, or \
+         layers and libxaac frame codec are present, but NVDEC/NVENC frame processing is not \
+         linked into the scheduler; use `aimedia run --mock` to exercise the program clock and control socket, or \
          `aimedia run --dry-run` to validate the graph"
     )
 }
@@ -715,12 +715,11 @@ fn explain_graph(config: &PipelineConfig) -> Value {
             "streaming MPEG-TS demux/mux with PSI/PES and PTS rollover",
             "runtime-loaded libsrt 1.5 transport boundary",
             "independent program clock and local Unix socket control",
-            "NVIDIA and libxaac availability probes",
+            "NVIDIA availability probe and libxaac AAC-LC frame codec",
             "replay, mock runtime and benchmark harness"
         ],
         "pendingForLiveMedia": [
             "NVDEC/NVENC frame submission and NV12 copy",
-            "libxaac decoder and encoder frame command sequence",
             "codec-to-scheduler data-plane integration",
             "SRT reconnect, network damage and interoperability qualification"
         ]

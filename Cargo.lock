@@ -35,6 +35,7 @@ dependencies = [
 name = "aimedia-aac"
 version = "0.1.0-alpha.1"
 dependencies = [
+ "aimedia-mpegts",
  "libloading",
  "serde",
  "thiserror",

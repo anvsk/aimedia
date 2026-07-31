@@ -20,10 +20,11 @@
 - 流式 MPEG-TS 同步恢复、PSI/PES、PTS 回绕、PAT/PMT/PCR mux；
 - libsrt 1.5.5 caller/listener 回环、独立节目时钟和有界队列原语；
 - NVIDIA Video Codec SDK 13.0、CUDA/NVDEC/NVENC 和 libxaac 可用性探测；
+- libxaac AAC-LC 帧级编码/解码、固定 1024-sample cadence 和 native round-trip；
 - 确定性导播、音频 DSP、VLM contract、replay、bench、fuzz 和 CPU CI。
 
-当前尚不能完成真实直播闭环。NVDEC/NVENC 帧提交、libxaac 帧处理以及持续的
-SRT 数据面仍未接通。
+当前尚不能完成真实直播闭环。NVDEC/NVENC 帧提交、codec 到 scheduler 的集成以及
+持续的 SRT 数据面仍未接通。
 
 ## v0.2 Native Single-SRT
 
