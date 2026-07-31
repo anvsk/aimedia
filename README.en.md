@@ -6,7 +6,11 @@
 [![Fuzz](https://github.com/anvsk/aimedia/actions/workflows/fuzz.yml/badge.svg)](https://github.com/anvsk/aimedia/actions/workflows/fuzz.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-`aimedia` is an open-source, AI-native director engine for live-streaming and AI application developers. Its long-term goal is to replace FFmpeg inside a deliberately narrow, tested support matrix: two synchronized SRT cameras in, one continuously encoded SRT program out.
+`aimedia` is an open-source, AI-native production and publishing engine for live-media
+developers and integrators. It receives camera or remote contribution feeds, performs
+directing, audio processing, and encoding, then publishes one continuous program to a live
+platform or cloud service. Its long-term goal is to replace FFmpeg inside explicit market
+workflows, not to claim unfinished all-format compatibility.
 
 > Development preview: streaming TS, the SRT adapter, the program clock, and the local control plane are now in Phase 2. NVDEC/NVENC frame submission, libxaac frame processing, and the complete live data plane are not closed yet.
 
@@ -60,7 +64,8 @@ See the [architecture](docs/architecture.md), [support matrix](docs/support-matr
 
 Phase 2 documentation is currently maintained in Chinese to keep the solo-project workload
 focused on the native media path: [getting started](docs/getting-started.zh-CN.md),
-[user stories](docs/user-stories.md), [glossary](docs/glossary.md), and
+[user stories](docs/user-stories.md), [market support](docs/market-support.md),
+[platform presets](docs/platform-presets.md), [glossary](docs/glossary.md), and
 [design rationale](docs/design-rationale.md).
 
 ## License

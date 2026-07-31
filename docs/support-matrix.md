@@ -4,6 +4,7 @@
 
 - **supported**：有真实运行和兼容性验证。
 - **foundation**：核心行为已实现，但 native 数据面尚未接通。
+- **experimental**：真实实现存在，但平台、设备或稳定性覆盖不足。
 - **planned**：接口或路线已定义，尚未实现。
 - **out-of-scope**：当前 Alpha 不处理。
 
@@ -18,10 +19,17 @@
 | H.264 Annex-B / AAC ADTS parser | supported | NAL/frame、关键帧和 Alpha profile header |
 | BS.1770/4x true-peak DSP | foundation | 响度、增益、淡化和 limiter 已实现；未接 AAC codec |
 | SRT caller/listener | foundation | libsrt 1.5.5 adapter、epoll 和本机 native 回环已测；待自动重连/损伤测试 |
+| RTMP/RTMPS + FLV | planned | v0.4 中外共同平台发布基线 |
+| RTSP/RTP input | planned | v0.6 中国侧摄像机接入；不代表 GB28181 |
+| WHIP output | planned | v0.7 海外低延迟发布；H.264/Opus |
 | NVDEC/NVENC | foundation | SDK 13.0 driver probe 和 RAII surface 已实现；帧提交尚未实现 |
 | AAC-LC via libxaac | foundation | decoder/encoder 动态库和 Alpha profile 探测；帧 API 尚未实现 |
 | Silero VAD / 视觉 ONNX | planned | ONNX Runtime adapter |
 | REST/WebSocket 控制面 | planned | Beta |
-| RTMP、WHIP/WHEP | out-of-scope | 后续阶段 |
+| WHEP、HTTP-FLV/HLS viewer output | out-of-scope | 当前产品不建设观众侧源站或 CDN |
 | HEVC、AV1、文件 seek | out-of-scope | 后续阶段 |
 | FFmpeg CLI 全兼容 | out-of-scope | 只逐项增加已验证翻译 |
+
+后续状态升级必须记录 producer、consumer、平台或设备、GPU/驱动、连续运行时长和
+已知限制。平台名称出现在路线图中不等于已经兼容；真实账号未验证的社交平台保持
+`experimental` 或 `planned`。
