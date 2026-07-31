@@ -57,3 +57,8 @@ context 时，`sdk-runtime` 和 `sdk-build-test` 必须在构建阶段明确失�
 
 GPU 运行镜像将 libsrt 与 libxaac 的许可证和 NOTICE 安装到
 `/usr/local/share/licenses/`；SDK headers 不进入最终镜像。
+
+`native-test` 目标还会真实验证 SRT caller/listener 回环和断线恢复：listener 在首个
+caller 断开后按配置重建 socket，重连期间统计保持可读，第二个 caller 的消息到达后
+`reconnects` 才递增。发送端 adapter 不维护历史消息队列，退避期间的包由上层按有界
+队列策略丢弃。

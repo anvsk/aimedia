@@ -25,7 +25,7 @@ workflows, not to claim unfinished all-format compatibility.
 - 48 kHz BS.1770-style rolling loudness estimation and an 80 ms equal-power audio crossfade.
 - Clean-room streaming MPEG-TS sync, PSI/PES reassembly, PTS rollover, muxing, H.264 Annex-B, and AAC ADTS.
 - An independent program clock, bounded-capacity calculations, drift correction, and a versioned Unix socket control plane.
-- Runtime-loaded libsrt transport and NVIDIA availability boundaries.
+- Runtime-loaded libsrt transport with exponential reconnects, plus NVIDIA availability boundaries.
 - Native libxaac AAC-LC frame decoding/encoding with a fixed 1024-sample cadence.
 - One-to-two-input configuration and a single-input control/observability contract.
 - `probe`, `doctor`, `control`, `explain`, `run --dry-run`, `run --mock`, `replay`, and `bench`.

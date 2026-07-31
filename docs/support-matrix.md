@@ -19,7 +19,7 @@
 | 流式 MPEG-TS demux/mux | foundation | 任意字节分块、PSI/PES、CRC、PTS 回绕和 mux 往返已测；待真实流互操作 |
 | H.264 Annex-B / AAC ADTS parser | supported | NAL/frame、关键帧和 Alpha profile header |
 | BS.1770/4x true-peak DSP | foundation | 响度、增益、淡化和 limiter 已实现；AAC 帧级 codec 已就绪，待接运行时音频链 |
-| SRT caller/listener | foundation | libsrt 1.5.5 adapter、epoll 和本机 native 回环已测；待自动重连/损伤测试 |
+| SRT caller/listener | foundation | libsrt 1.5.5 adapter、epoll、指数退避和断开后 native 重连已测；输出层不保存历史包，待网络损伤与长稳测试 |
 | RTMP/RTMPS + FLV | planned | v0.4 中外共同平台发布基线 |
 | RTSP/RTP input | planned | v0.6 中国侧摄像机接入；不代表 GB28181 |
 | WHIP output | planned | v0.7 海外低延迟发布；H.264/Opus |
