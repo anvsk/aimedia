@@ -58,10 +58,30 @@ RUN git init /src/libxaac \
     && ln -s libxaacenc.so.0.0.0 /opt/native/lib/libxaacenc.so.0 \
     && ln -s libxaacenc.so.0 /opt/native/lib/libxaacenc.so
 
+COPY crates/aimedia-aac/native/ /src/aimedia-aac-native/
+RUN cc -std=c11 -D_POSIX_C_SOURCE=200112L -fPIC -Wall -Wextra -Werror \
+       -I/src/aimedia-aac-native \
+       -I/src/libxaac/common \
+       -I/src/libxaac/decoder \
+       -I/src/libxaac/encoder \
+       -c /src/aimedia-aac-native/aimedia_xaac.c \
+       -o /tmp/aimedia_xaac.o \
+    && cc -shared -Wl,-soname,libaimedia_xaac.so.0 \
+       /tmp/aimedia_xaac.o -L/opt/native/lib \
+       -Wl,-rpath,'$ORIGIN' -lxaacdec -lxaacenc -lm -lpthread \
+       -o /opt/native/lib/libaimedia_xaac.so.0.0.0 \
+    && ln -s libaimedia_xaac.so.0.0.0 /opt/native/lib/libaimedia_xaac.so.0 \
+    && ln -s libaimedia_xaac.so.0 /opt/native/lib/libaimedia_xaac.so \
+    && mkdir -p /opt/native/share/licenses/libxaac /opt/native/share/licenses/libsrt \
+    && cp /src/libxaac/LICENSE /src/libxaac/NOTICE /opt/native/share/licenses/libxaac/ \
+    && cp /src/srt/LICENSE /opt/native/share/licenses/libsrt/
+
 FROM rust-builder AS native-test
 COPY --from=native-builder /opt/native/lib/ /usr/local/lib/
 RUN ldconfig \
     && cargo test -p aimedia-srt native_caller_listener_loopback_preserves_one_ts_message \
+       -- --ignored --nocapture \
+    && cargo test -p aimedia-aac native_round_trip_uses_1024_sample_cadence \
        -- --ignored --nocapture
 
 FROM rust-builder-sdk AS sdk-build-test
@@ -77,6 +97,7 @@ RUN apt-get update \
     && mkdir -p /run/aimedia \
     && chown aimedia:aimedia /run/aimedia
 COPY --from=native-builder /opt/native/lib/ /usr/local/lib/
+COPY --from=native-builder /opt/native/share/ /usr/local/share/
 RUN ldconfig
 USER 10001
 ENTRYPOINT ["aimedia"]

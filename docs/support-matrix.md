@@ -23,7 +23,7 @@
 | RTSP/RTP input | planned | v0.6 中国侧摄像机接入；不代表 GB28181 |
 | WHIP output | planned | v0.7 海外低延迟发布；H.264/Opus |
 | NVDEC/NVENC | foundation | SDK 13.0 driver probe 和 RAII surface 已实现；帧提交尚未实现 |
-| AAC-LC via libxaac | foundation | decoder/encoder 动态库和 Alpha profile 探测；帧 API 尚未实现 |
+| AAC-LC via libxaac | foundation | 48kHz 双声道、128kbps ADTS 帧级 encode/decode、flush、固定 cadence 和 native round-trip 已测；待接运行时与长稳 |
 | Silero VAD / 视觉 ONNX | planned | ONNX Runtime adapter |
 | REST/WebSocket 控制面 | planned | Beta |
 | WHEP、HTTP-FLV/HLS viewer output | out-of-scope | 当前产品不建设观众侧源站或 CDN |

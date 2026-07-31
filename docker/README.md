@@ -18,8 +18,9 @@ docker run --rm --gpus all \
   aimedia:gpu-probe doctor --strict
 ```
 
-`doctor --strict` 通过只表示 libsrt、CUDA/NVDEC/NVENC driver libraries 和 libxaac
-公共符号可用；在支持矩阵升级前，它不代表 codec 帧处理已经完成。
+`doctor --strict` 会验证 libsrt、CUDA/NVDEC/NVENC driver libraries，并实际创建后
+释放 libxaac 编码/解码上下文。它仍不代表 NVDEC/NVENC 帧提交或完整直播数据面已经
+完成。
 
 ## Video Codec SDK 13.0 named context
 
@@ -53,3 +54,6 @@ docker buildx build `
 SDK headers 和 CUDA headers 只存在于 builder stage，不进入运行镜像。未传 named
 context 时，`sdk-runtime` 和 `sdk-build-test` 必须在构建阶段明确失败；普通 CPU CI
 以及 `probe-runtime` 不需要 SDK。
+
+GPU 运行镜像将 libsrt 与 libxaac 的许可证和 NOTICE 安装到
+`/usr/local/share/licenses/`；SDK headers 不进入最终镜像。

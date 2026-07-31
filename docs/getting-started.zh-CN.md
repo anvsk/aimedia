@@ -66,8 +66,9 @@ aimedia control auto
 
 `hold-ms 0` 表示保持人工模式，直到执行 `auto`。不可用或不同步的目标机位会返回 `targetUnavailable`。
 
-当前不带 `--mock` 的 `aimedia run` 会明确退出，因为 NVDEC/NVENC 和 libxaac 的帧级
-处理还没有接入调度器。后续支持真实流时，本节才会替换为生产启动命令。
+当前不带 `--mock` 的 `aimedia run` 会明确退出。libxaac 帧级处理已经完成，但
+NVDEC/NVENC 和 codec 到 scheduler 的真实数据面还没有接通。后续支持真实流时，
+本节才会替换为生产启动命令。
 
 ## 5. 常见问题
 
