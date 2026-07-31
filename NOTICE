@@ -1,0 +1,8 @@
+aimedia
+Copyright 2026 aimedia contributors
+
+This product is licensed under the Apache License, Version 2.0.
+
+Optional builds may use separately licensed components including libsrt, ONNX Runtime,
+Silero VAD, libxaac, Qwen model weights, and NVIDIA runtime libraries. Their notices and
+distribution conditions must accompany any build that includes them.

@@ -1,0 +1,73 @@
+apiVersion: aimedia/v1alpha1
+kind: DirectorPipeline
+metadata:
+  name: two-camera-demo
+
+inputs:
+  - name: wide
+    role: wide
+    uri: srt://0.0.0.0:9001?mode=listener
+    offsetMs: 0
+    secretRef:
+      env: AIMEDIA_SRT_WIDE_PASSPHRASE
+  - name: close
+    role: close
+    uri: srt://0.0.0.0:9002?mode=listener
+    offsetMs: 35
+    secretRef:
+      env: AIMEDIA_SRT_CLOSE_PASSPHRASE
+
+output:
+  uri: srt://127.0.0.1:10000?mode=caller
+  secretRef:
+    env: AIMEDIA_SRT_OUTPUT_PASSPHRASE
+
+media:
+  video:
+    width: 1920
+    height: 1080
+    fps: 30
+    bitrateKbps: 6000
+    gopMs: 1000
+    profile: main
+    bFrames: 0
+  audio:
+    sampleRate: 48000
+    channels: 2
+    bitrateKbps: 128
+
+sync:
+  masterInput: 0
+  bufferMs: 1000
+  maxSkewMs: 80
+
+fastAnalyzers:
+  vad: true
+  person: true
+  mouthMotion: true
+  quality: true
+
+vlmAdvisor:
+  mode: disabled
+  model: Qwen3-VL-2B-Instruct
+  intervalMs: 2000
+  deadlineMs: 800
+  validForMs: 3000
+  weight: 0.25
+  explicitPrivacyConsent: false
+
+directorPolicy:
+  minShotMs: 3000
+  scoreMargin: 0.15
+  candidateHoldMs: 800
+  cooldownMs: 2000
+
+audioSwitch:
+  targetLufs: -16.0
+  crossfadeMs: 80
+  truePeakDbfs: -1.0
+
+failurePolicy:
+  failoverOnDisconnect: true
+  pauseAutoOnSkew: true
+  ignoreVlmFailure: true

@@ -1,0 +1,25 @@
+name: fuzz
+
+on:
+  pull_request:
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-smoke:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: fuzz
+      - run: cargo install cargo-fuzz --locked
+      - run: cargo fuzz build
+      - run: cargo fuzz run mpegts -- -max_total_time=20
+      - run: cargo fuzz run elementary -- -max_total_time=20
+      - run: cargo fuzz run config -- -max_total_time=20

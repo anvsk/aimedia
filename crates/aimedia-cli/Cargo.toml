@@ -1,0 +1,27 @@
+[package]
+name = "aimedia"
+description = "AI-native dual-camera live director"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "aimedia"
+path = "src/main.rs"
+
+[dependencies]
+aimedia-core = { version = "0.1.0-alpha.1", path = "../aimedia-core" }
+aimedia-mpegts = { version = "0.1.0-alpha.1", path = "../aimedia-mpegts" }
+anyhow.workspace = true
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[lints]
+workspace = true

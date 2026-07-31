@@ -1,0 +1,26 @@
+name: Feature request
+description: Propose a scoped capability or interoperability target.
+title: "[Feature] "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: use_case
+    attributes:
+      label: Use case
+      description: Describe the production workflow and why the capability matters.
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Proposed scope
+      description: Include formats, transports, hardware, latency, and failure behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance evidence
+      description: What captures, players, encoders, or hardware should be used for validation?
+    validations:
+      required: true

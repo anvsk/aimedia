@@ -1,0 +1,37 @@
+[package]
+name = "aimedia-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+aimedia-core = { path = "../crates/aimedia-core" }
+aimedia-mpegts = { path = "../crates/aimedia-mpegts" }
+libfuzzer-sys = "0.4"
+
+[[bin]]
+name = "mpegts"
+path = "fuzz_targets/mpegts.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "elementary"
+path = "fuzz_targets/elementary.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "config"
+path = "fuzz_targets/config.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]
+members = ["."]

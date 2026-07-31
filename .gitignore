@@ -1,0 +1,9 @@
+/target/
+/fuzz/target/
+/.idea/
+/.vscode/
+*.swp
+*.tmp
+*.log
+.env
+.DS_Store
