@@ -28,7 +28,8 @@
 - 独立节目时钟、队列容量计算、1ms/s 漂移校正和版本化 Unix Socket 控制面；
 - 运行时加载的 libsrt caller/listener/epoll/加密/统计边界、指数退避重连和 NVIDIA
   环境探测；
-- libxaac AAC-LC 帧级解码/编码、1024-sample cadence、flush 和 native round-trip；
+- libxaac AAC-LC 帧级解码/编码、`aimedia-core` backend adapter、1024-sample
+  cadence、flush 和 native round-trip；
 - 一到两路输入配置、单路运行状态，以及队列/codec/GPU/SRT 可观测性契约；
 - 可注入 transport/codec 后端的单路有界调度器，已用 CPU fake backend 验证任意 TS
   分块、解复用、独立节目时钟、编码、复用、发送和完整排空；

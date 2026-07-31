@@ -9,10 +9,16 @@ authors.workspace = true
 repository.workspace = true
 
 [dependencies]
+aimedia-core = { version = "0.1.0-alpha.1", path = "../aimedia-core" }
 aimedia-mpegts = { version = "0.1.0-alpha.1", path = "../aimedia-mpegts" }
+async-trait.workspace = true
+bytes.workspace = true
 libloading.workspace = true
 serde.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true
 
 [lints]
 workspace = true
