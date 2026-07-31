@@ -1,0 +1,61 @@
+FROM rust:1.88-bookworm AS rust-builder
+WORKDIR /src
+COPY . .
+RUN cargo build --locked --release -p aimedia
+
+FROM debian:bookworm AS native-builder
+ARG SRT_REF=v1.5.5
+ARG LIBXAAC_REF=98a7d53a326eb22f537615c14f15ce4862d50489
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+       build-essential ca-certificates cmake git libssl-dev pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN git clone --depth 1 --branch "${SRT_REF}" https://github.com/Haivision/srt.git /src/srt \
+    && cmake -S /src/srt -B /src/srt/build \
+       -DCMAKE_BUILD_TYPE=Release \
+       -DCMAKE_INSTALL_PREFIX=/opt/native \
+       -DENABLE_APPS=OFF \
+       -DENABLE_SHARED=ON \
+       -DENABLE_STATIC=OFF \
+    && cmake --build /src/srt/build --parallel \
+    && cmake --install /src/srt/build
+
+RUN git init /src/libxaac \
+    && git -C /src/libxaac remote add origin https://android.googlesource.com/platform/external/libxaac \
+    && git -C /src/libxaac fetch --depth 1 origin "${LIBXAAC_REF}" \
+    && git -C /src/libxaac checkout --detach FETCH_HEAD \
+    && cmake -S /src/libxaac -B /src/libxaac/build \
+       -DCMAKE_BUILD_TYPE=Release \
+       -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+    && cmake --build /src/libxaac/build --parallel \
+    && mkdir -p /opt/native/lib \
+    && cc -shared -Wl,-soname,libxaacdec.so.0 \
+       -Wl,--whole-archive /src/libxaac/build/libxaacdec.a -Wl,--no-whole-archive \
+       -lm -lpthread -o /opt/native/lib/libxaacdec.so.0.0.0 \
+    && cc -shared -Wl,-soname,libxaacenc.so.0 \
+       -Wl,--whole-archive /src/libxaac/build/libxaacenc.a -Wl,--no-whole-archive \
+       -lm -lpthread -o /opt/native/lib/libxaacenc.so.0.0.0 \
+    && ln -s libxaacdec.so.0.0.0 /opt/native/lib/libxaacdec.so.0 \
+    && ln -s libxaacdec.so.0 /opt/native/lib/libxaacdec.so \
+    && ln -s libxaacenc.so.0.0.0 /opt/native/lib/libxaacenc.so.0 \
+    && ln -s libxaacenc.so.0 /opt/native/lib/libxaacenc.so
+
+FROM rust-builder AS native-test
+COPY --from=native-builder /opt/native/lib/ /usr/local/lib/
+RUN ldconfig \
+    && cargo test -p aimedia-srt native_caller_listener_loopback_preserves_one_ts_message \
+       -- --ignored --nocapture
+
+FROM debian:bookworm-slim
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates libssl3 libstdc++6 \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --create-home --uid 10001 aimedia \
+    && mkdir -p /run/aimedia \
+    && chown aimedia:aimedia /run/aimedia
+COPY --from=native-builder /opt/native/lib/ /usr/local/lib/
+COPY --from=rust-builder /src/target/release/aimedia /usr/local/bin/aimedia
+RUN ldconfig
+USER 10001
+ENTRYPOINT ["aimedia"]

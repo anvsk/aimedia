@@ -205,3 +205,103 @@ pub fn apply_gain_and_peak_limit(samples: &mut [f32], gain: f32, peak_dbfs: f32)
         *sample = (*sample * gain).clamp(-peak, peak);
     }
 }
+
+/// Estimates inter-sample peak with a four-times, eight-lobe windowed-sinc interpolator.
+///
+/// This is intentionally block based. Callers should prepend the previous eight source frames
+/// when measuring adjacent codec blocks so peaks across a block boundary are included.
+#[must_use]
+pub fn true_peak_4x(samples: &[f32], channels: usize) -> Option<f32> {
+    if channels == 0 || samples.is_empty() || samples.len() % channels != 0 {
+        return None;
+    }
+    let frames = samples.len() / channels;
+    let mut peak = samples
+        .iter()
+        .fold(0.0_f32, |current, sample| current.max(sample.abs()));
+
+    for channel in 0..channels {
+        for frame in 0..frames.saturating_sub(1) {
+            for phase in 1..4 {
+                let position = frame as f64 + f64::from(phase) / 4.0;
+                let mut interpolated = 0.0_f64;
+                let mut weight_sum = 0.0_f64;
+                for tap in -7_i64..=8 {
+                    let source_index = frame as i64 + tap;
+                    if !(0..frames as i64).contains(&source_index) {
+                        continue;
+                    }
+                    let distance = position - source_index as f64;
+                    let sinc = if distance.abs() < f64::EPSILON {
+                        1.0
+                    } else {
+                        let angle = std::f64::consts::PI * distance;
+                        angle.sin() / angle
+                    };
+                    let normalized = distance / 8.0;
+                    let window = if normalized.abs() <= 1.0 {
+                        0.5 * (1.0 + (std::f64::consts::PI * normalized).cos())
+                    } else {
+                        0.0
+                    };
+                    let weight = sinc * window;
+                    interpolated +=
+                        f64::from(samples[source_index as usize * channels + channel]) * weight;
+                    weight_sum += weight;
+                }
+                if weight_sum.abs() > f64::EPSILON {
+                    peak = peak.max((interpolated / weight_sum).abs() as f32);
+                }
+            }
+        }
+    }
+    Some(peak)
+}
+
+/// Applies one block-wide gain reduction so the measured 4x true peak does not exceed the limit.
+pub fn apply_true_peak_limit_4x(
+    samples: &mut [f32],
+    channels: usize,
+    peak_dbfs: f32,
+) -> Result<f32, AudioError> {
+    if channels == 0 {
+        return Err(AudioError::ZeroChannels);
+    }
+    if samples.len() % channels != 0 {
+        return Err(AudioError::MisalignedSamples {
+            samples: samples.len(),
+            channels,
+        });
+    }
+    let limit = 10.0_f32.powf(peak_dbfs.min(0.0) / 20.0);
+    let measured = true_peak_4x(samples, channels).unwrap_or(0.0);
+    let gain = if measured > limit && measured > f32::EPSILON {
+        limit / measured
+    } else {
+        1.0
+    };
+    for sample in samples {
+        *sample *= gain;
+    }
+    Ok(gain)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{apply_true_peak_limit_4x, true_peak_4x};
+
+    #[test]
+    fn four_times_limiter_keeps_measured_peak_below_limit() {
+        let mut samples = Vec::new();
+        for index in 0..128 {
+            let value = if index % 2 == 0 { 0.95 } else { -0.95 };
+            samples.extend_from_slice(&[value, value]);
+        }
+        let gain =
+            apply_true_peak_limit_4x(&mut samples, 2, -1.0).expect("valid stereo audio block");
+        assert!(gain <= 1.0);
+        let peak = true_peak_4x(&samples, 2).expect("peak is measured");
+        let limit = 10.0_f32.powf(-1.0 / 20.0);
+        assert!(peak <= limit + 1e-5);
+    }
+}

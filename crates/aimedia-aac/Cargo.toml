@@ -1,6 +1,6 @@
 [package]
-name = "aimedia-mpegts"
-description = "Clean-room MPEG-TS packet parser and probe utilities for aimedia"
+name = "aimedia-aac"
+description = "Runtime-loaded Android libxaac boundary for aimedia"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,7 +9,7 @@ authors.workspace = true
 repository.workspace = true
 
 [dependencies]
-bytes.workspace = true
+libloading.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 

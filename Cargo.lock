@@ -15,15 +15,29 @@ dependencies = [
 name = "aimedia"
 version = "0.1.0-alpha.1"
 dependencies = [
+ "aimedia-aac",
  "aimedia-core",
  "aimedia-mpegts",
+ "aimedia-nvidia",
+ "aimedia-runtime",
+ "aimedia-srt",
  "anyhow",
  "clap",
  "serde",
  "serde_json",
  "serde_yaml",
+ "tokio",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "aimedia-aac"
+version = "0.1.0-alpha.1"
+dependencies = [
+ "libloading",
+ "serde",
+ "thiserror",
 ]
 
 [[package]]
@@ -31,6 +45,7 @@ name = "aimedia-core"
 version = "0.1.0-alpha.1"
 dependencies = [
  "async-trait",
+ "bytes",
  "reqwest",
  "serde",
  "serde_json",
@@ -44,8 +59,43 @@ dependencies = [
 name = "aimedia-mpegts"
 version = "0.1.0-alpha.1"
 dependencies = [
+ "bytes",
  "serde",
  "thiserror",
+]
+
+[[package]]
+name = "aimedia-nvidia"
+version = "0.1.0-alpha.1"
+dependencies = [
+ "aimedia-core",
+ "libloading",
+ "serde",
+ "thiserror",
+]
+
+[[package]]
+name = "aimedia-runtime"
+version = "0.1.0-alpha.1"
+dependencies = [
+ "aimedia-core",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "aimedia-srt"
+version = "0.1.0-alpha.1"
+dependencies = [
+ "aimedia-core",
+ "async-trait",
+ "libc",
+ "libloading",
+ "thiserror",
+ "tokio",
+ "url",
 ]
 
 [[package]]
@@ -144,6 +194,9 @@ name = "bytes"
 version = "1.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "cc"
@@ -249,6 +302,16 @@ name = "equivalent"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "877a4ace8713b0bcf2a4e7eec82529c029f1d0619886d18145fea96c3ffe5c0f"
+
+[[package]]
+name = "errno"
+version = "0.3.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
+dependencies = [
+ "libc",
+ "windows-sys 0.61.2",
+]
 
 [[package]]
 name = "find-msvc-tools"
@@ -588,6 +651,16 @@ name = "libc"
 version = "0.2.189"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3eaf3ede3fee6db1a4c2ee091bf8a8b4dccdc6d17f656fb07896ee72867612f2"
+
+[[package]]
+name = "libloading"
+version = "0.8.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d7c4b02199fee7c5d21a5ae7d8cfa79a6ef5bb2fc834d6e9058e89c825efdc55"
+dependencies = [
+ "cfg-if",
+ "windows-link",
+]
 
 [[package]]
 name = "litemap"
@@ -987,6 +1060,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 
 [[package]]
+name = "signal-hook-registry"
+version = "1.4.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c4db69cba1110affc0e9f7bcd48bbf87b3f4fc7c61fc9155afd4c469eb3d6c1b"
+dependencies = [
+ "errno",
+ "libc",
+]
+
+[[package]]
 name = "slab"
 version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1132,6 +1215,7 @@ dependencies = [
  "libc",
  "mio",
  "pin-project-lite",
+ "signal-hook-registry",
  "socket2",
  "tokio-macros",
  "windows-sys 0.61.2",

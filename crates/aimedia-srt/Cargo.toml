@@ -1,6 +1,6 @@
 [package]
-name = "aimedia-core"
-description = "Core types, scheduling, synchronization, and AI director logic for aimedia"
+name = "aimedia-srt"
+description = "Safe runtime-loaded libsrt 1.5 transport adapter for aimedia"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,15 +9,13 @@ authors.workspace = true
 repository.workspace = true
 
 [dependencies]
+aimedia-core = { version = "0.1.0-alpha.1", path = "../aimedia-core" }
 async-trait.workspace = true
-bytes.workspace = true
-reqwest.workspace = true
-serde.workspace = true
-serde_json.workspace = true
-serde_yaml.workspace = true
+libc.workspace = true
+libloading.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
-tracing.workspace = true
+url.workspace = true
 
 [lints]
 workspace = true

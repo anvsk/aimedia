@@ -6,6 +6,7 @@
 pub mod audio;
 pub mod backend;
 pub mod config;
+pub mod control;
 pub mod director;
 pub mod plugin_abi;
 pub mod sync;
@@ -13,6 +14,10 @@ pub mod time;
 pub mod vlm;
 
 pub use config::{ConfigError, PipelineConfig};
+pub use control::{
+    ControlCommand, ControlErrorCode, ControlRequest, ControlResponse, InputRuntimeState,
+    PipelineMode, PipelineRuntimeState, SrtRuntimeStats,
+};
 pub use director::{
     CameraSnapshot, Director, DirectorDecision, DirectorEvent, FastSignals, SwitchReason,
 };

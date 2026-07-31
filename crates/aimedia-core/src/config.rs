@@ -1,4 +1,8 @@
-use std::{collections::HashSet, fs, path::Path};
+use std::{
+    collections::HashSet,
+    fs,
+    path::{Path, PathBuf},
+};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -38,6 +42,8 @@ pub struct PipelineConfig {
     pub audio_switch: AudioSwitchConfig,
     #[serde(default)]
     pub failure_policy: FailurePolicyConfig,
+    #[serde(default)]
+    pub control: ControlConfig,
 }
 
 impl PipelineConfig {
@@ -90,10 +96,12 @@ impl PipelineConfig {
                 errors.push(format!("{prefix}.offsetMs must be between -5000 and 5000"));
             }
             validate_secret_ref(input.secret_ref.as_ref(), &prefix, &mut errors);
+            validate_srt(&input.srt, &format!("{prefix}.srt"), &mut errors);
         }
 
         validate_srt_uri(&self.output.uri, "output.uri", &mut errors);
         validate_secret_ref(self.output.secret_ref.as_ref(), "output", &mut errors);
+        validate_srt(&self.output.srt, "output.srt", &mut errors);
 
         let video = &self.media.video;
         if video.width == 0 || video.width > 1920 {
@@ -197,6 +205,14 @@ impl PipelineConfig {
             errors.push("audioSwitch.truePeakDbfs must be between -12 and 0".to_owned());
         }
 
+        if self.control.socket_path.as_os_str().is_empty() {
+            errors.push("control.socketPath must not be empty".to_owned());
+        }
+        if parse_socket_mode(&self.control.socket_mode).is_none() {
+            errors
+                .push("control.socketMode must be an octal mode between 0000 and 0777".to_owned());
+        }
+
         if errors.is_empty() {
             Ok(())
         } else {
@@ -205,9 +221,70 @@ impl PipelineConfig {
     }
 }
 
+fn validate_srt(config: &SrtConfig, path: &str, errors: &mut Vec<String>) {
+    if !(20..=8_000).contains(&config.latency_ms) {
+        errors.push(format!("{path}.latencyMs must be between 20 and 8000"));
+    }
+    if !(100..=60_000).contains(&config.connect_timeout_ms) {
+        errors.push(format!(
+            "{path}.connectTimeoutMs must be between 100 and 60000"
+        ));
+    }
+    if config.reconnect.initial_backoff_ms == 0
+        || config.reconnect.initial_backoff_ms > config.reconnect.max_backoff_ms
+        || config.reconnect.max_backoff_ms > 60_000
+    {
+        errors.push(format!(
+            "{path}.reconnect backoff must satisfy 1 <= initialBackoffMs <= maxBackoffMs <= 60000"
+        ));
+    }
+    if !matches!(config.key_length, 16 | 24 | 32) {
+        errors.push(format!("{path}.keyLength must be 16, 24, or 32"));
+    }
+    if config.stream_id.is_some() && config.stream_id_ref.is_some() {
+        errors.push(format!("{path} must not set both streamId and streamIdRef"));
+    }
+    if config
+        .stream_id
+        .as_deref()
+        .is_some_and(contains_sensitive_stream_id)
+    {
+        errors.push(format!(
+            "{path}.streamId appears to contain a token or credential; use streamIdRef"
+        ));
+    }
+    validate_secret_ref(
+        config.stream_id_ref.as_ref(),
+        &format!("{path}.streamIdRef"),
+        errors,
+    );
+}
+
+fn contains_sensitive_stream_id(stream_id: &str) -> bool {
+    let lower = stream_id.to_ascii_lowercase();
+    ["token=", "secret=", "password=", "passphrase=", "bearer "]
+        .iter()
+        .any(|marker| lower.contains(marker))
+}
+
+#[must_use]
+pub fn parse_socket_mode(value: &str) -> Option<u32> {
+    let mode = u32::from_str_radix(value, 8).ok()?;
+    (mode <= 0o777).then_some(mode)
+}
+
 fn validate_srt_uri(uri: &str, path: &str, errors: &mut Vec<String>) {
     if !uri.starts_with("srt://") {
         errors.push(format!("{path} must use the srt:// scheme"));
+    }
+    let authority = uri
+        .strip_prefix("srt://")
+        .and_then(|rest| rest.split(['/', '?']).next())
+        .unwrap_or_default();
+    if authority.contains('@') {
+        errors.push(format!(
+            "{path} contains URI userinfo; use secretRef instead"
+        ));
     }
     let lower = uri.to_ascii_lowercase();
     for sensitive in ["passphrase=", "token=", "secret=", "password="] {
@@ -256,6 +333,8 @@ pub struct InputConfig {
     pub offset_ms: i64,
     #[serde(default)]
     pub secret_ref: Option<SecretRef>,
+    #[serde(default)]
+    pub srt: SrtConfig,
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
@@ -273,6 +352,8 @@ pub struct OutputConfig {
     pub uri: String,
     #[serde(default)]
     pub secret_ref: Option<SecretRef>,
+    #[serde(default)]
+    pub srt: SrtConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -282,6 +363,171 @@ pub struct SecretRef {
     pub env: Option<String>,
     #[serde(default)]
     pub file: Option<std::path::PathBuf>,
+}
+
+impl SecretRef {
+    pub fn resolve(&self) -> Result<String, SecretError> {
+        match (&self.env, &self.file) {
+            (Some(name), None) if !name.is_empty() => {
+                std::env::var(name).map_err(|_| SecretError::MissingEnvironment(name.clone()))
+            }
+            (None, Some(path)) if !path.as_os_str().is_empty() => {
+                let value = fs::read_to_string(path)
+                    .map_err(|source| SecretError::ReadFile(path.clone(), source))?;
+                Ok(value.trim_end_matches(['\r', '\n']).to_owned())
+            }
+            _ => Err(SecretError::InvalidReference),
+        }
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum SecretError {
+    #[error("secret environment variable {0:?} is not set")]
+    MissingEnvironment(String),
+    #[error("failed to read secret file {0}: {1}")]
+    ReadFile(PathBuf, std::io::Error),
+    #[error("secret reference must set exactly one of env or file")]
+    InvalidReference,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SrtConfig {
+    #[serde(default)]
+    pub mode: Option<SrtMode>,
+    #[serde(default = "default_srt_latency")]
+    pub latency_ms: u64,
+    #[serde(default = "default_connect_timeout")]
+    pub connect_timeout_ms: u64,
+    #[serde(default)]
+    pub reconnect: ReconnectConfig,
+    #[serde(default)]
+    pub stream_id: Option<String>,
+    #[serde(default)]
+    pub stream_id_ref: Option<SecretRef>,
+    #[serde(default = "default_srt_key_length")]
+    pub key_length: u16,
+}
+
+impl Default for SrtConfig {
+    fn default() -> Self {
+        Self {
+            mode: None,
+            latency_ms: default_srt_latency(),
+            connect_timeout_ms: default_connect_timeout(),
+            reconnect: ReconnectConfig::default(),
+            stream_id: None,
+            stream_id_ref: None,
+            key_length: default_srt_key_length(),
+        }
+    }
+}
+
+impl SrtConfig {
+    #[must_use]
+    pub fn effective_mode(&self, uri: &str) -> SrtMode {
+        self.mode
+            .or_else(|| mode_from_uri_query(uri))
+            .unwrap_or(SrtMode::Caller)
+    }
+
+    pub fn resolve_stream_id(&self) -> Result<Option<String>, SecretError> {
+        match (&self.stream_id, &self.stream_id_ref) {
+            (Some(value), None) => Ok(Some(value.clone())),
+            (None, Some(reference)) => reference.resolve().map(Some),
+            (None, None) => Ok(None),
+            _ => Err(SecretError::InvalidReference),
+        }
+    }
+}
+
+fn mode_from_uri_query(uri: &str) -> Option<SrtMode> {
+    let query = uri.split_once('?')?.1;
+    query.split('&').find_map(|pair| {
+        let (key, value) = pair.split_once('=')?;
+        if key.eq_ignore_ascii_case("mode") {
+            if value.eq_ignore_ascii_case("caller") {
+                Some(SrtMode::Caller)
+            } else if value.eq_ignore_ascii_case("listener") {
+                Some(SrtMode::Listener)
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SrtMode {
+    Caller,
+    Listener,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ReconnectConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default = "default_initial_backoff")]
+    pub initial_backoff_ms: u64,
+    #[serde(default = "default_max_backoff")]
+    pub max_backoff_ms: u64,
+}
+
+impl Default for ReconnectConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            initial_backoff_ms: default_initial_backoff(),
+            max_backoff_ms: default_max_backoff(),
+        }
+    }
+}
+
+const fn default_srt_latency() -> u64 {
+    120
+}
+const fn default_connect_timeout() -> u64 {
+    3_000
+}
+const fn default_srt_key_length() -> u16 {
+    16
+}
+const fn default_initial_backoff() -> u64 {
+    250
+}
+const fn default_max_backoff() -> u64 {
+    5_000
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ControlConfig {
+    #[serde(default = "default_control_socket")]
+    pub socket_path: PathBuf,
+    #[serde(default = "default_control_mode")]
+    pub socket_mode: String,
+}
+
+impl Default for ControlConfig {
+    fn default() -> Self {
+        Self {
+            socket_path: default_control_socket(),
+            socket_mode: default_control_mode(),
+        }
+    }
+}
+
+fn default_control_socket() -> PathBuf {
+    PathBuf::from("/run/aimedia/aimedia.sock")
+}
+
+fn default_control_mode() -> String {
+    "0660".to_owned()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -590,7 +836,7 @@ impl Default for FailurePolicyConfig {
 
 #[cfg(test)]
 mod tests {
-    use super::PipelineConfig;
+    use super::{PipelineConfig, validate_srt_uri};
 
     #[test]
     fn accepts_the_reference_alpha_configuration() {
@@ -599,5 +845,17 @@ mod tests {
         assert_eq!(config.inputs.len(), 2);
         assert_eq!(config.sync.max_skew_ms, 80);
         assert_eq!(config.media.video.gop_ms, 1_000);
+    }
+
+    #[test]
+    fn rejects_query_and_userinfo_credentials_in_srt_uris() {
+        for uri in [
+            "srt://user:password@example.test:9000",
+            "srt://example.test:9000?token=secret",
+        ] {
+            let mut errors = Vec::new();
+            validate_srt_uri(uri, "input.uri", &mut errors);
+            assert!(!errors.is_empty(), "{uri} must be rejected");
+        }
     }
 }
