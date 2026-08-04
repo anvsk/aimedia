@@ -1,0 +1,17 @@
+[package]
+name = "aimedia-graph"
+description = "Intent compiler and typed execution plans for aimedia media jobs"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+aimedia-core = { version = "0.1.0-alpha.1", path = "../core" }
+serde.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

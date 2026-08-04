@@ -1,6 +1,6 @@
 [package]
-name = "aimedia-aac"
-description = "Runtime-loaded Android libxaac boundary for aimedia"
+name = "aimedia-srt"
+description = "Safe runtime-loaded libsrt 1.5 transport adapter for aimedia"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,16 +9,13 @@ authors.workspace = true
 repository.workspace = true
 
 [dependencies]
-aimedia-core = { version = "0.1.0-alpha.1", path = "../aimedia-core" }
-aimedia-mpegts = { version = "0.1.0-alpha.1", path = "../aimedia-mpegts" }
+aimedia-core = { version = "0.1.0-alpha.1", path = "../core" }
 async-trait.workspace = true
-bytes.workspace = true
+libc.workspace = true
 libloading.workspace = true
-serde.workspace = true
 thiserror.workspace = true
-
-[dev-dependencies]
 tokio.workspace = true
+url.workspace = true
 
 [lints]
 workspace = true

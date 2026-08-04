@@ -1,29 +1,51 @@
-# 第二阶段快速入门
+# 快速入门
 
-当前仓库正在按路线图接通原生数据面。每条命令是否可用，以 `README` 的“当前状态”和支持矩阵为准。
+当前版本可以在 CPU 环境校验配置、编译执行图、运行 fake backend 和检查 native
+依赖。真实 NVDEC/NVENC 数据面尚未闭环；每项能力以[支持矩阵](support-matrix.md)为准。
 
-## 1. 先理解要运行什么
+## 1. 先理解当前作业
 
 ```text
-机位 wide  --SRT--> \
-                      aimedia --SRT--> 节目播放器或平台
-机位 close --SRT--> /
+SRT/MPEG-TS 输入
+        |
+        v
+拆分音视频 -> 解码 -> 独立节目时间线 -> 编码 -> MPEG-TS/SRT 输出
+                         |
+                         `-> 非阻塞 AI Tap（后续）
 ```
 
-配置允许一路或两路输入。v0.2 优先接通单路闭环；两路导播数据面属于 v0.3。输入
-必须是 MPEG-TS，视频为 H.264 8-bit 4:2:0、最高 1080p30，音频为 AAC-LC
-48kHz 双声道；两路模式还要求分辨率和帧率相同。
+v0.2 固定 H.264 8-bit 4:2:0、最高 1080p30、AAC-LC 48kHz 双声道。固定支持范围不是
+永久限制，而是为了先把一个真实工作流做完。
 
-不熟悉缩写时先看[术语表](glossary.md)，架构取舍见[设计理由](design-rationale.md)。
+不熟悉缩写时先看[术语表](glossary.md)，新架构见[架构说明](architecture.md)。
 
-## 2. 环境要求
+## 2. 在 CPU 环境查看执行计划
 
-- Linux x86_64。
-- Docker Engine 或 Docker Desktop。
-- NVIDIA GPU、兼容驱动和 NVIDIA Container Toolkit。
-- Video Codec SDK 13.0，仅在构建 GPU 后端时需要。
+要求 Rust 1.85 或更新版本：
 
-先检查 GPU 是否能进入容器：
+```bash
+cargo run -p aimedia -- explain -f examples/single-srt.yaml
+cargo run -p aimedia -- explain -f examples/single-srt.yaml --json
+```
+
+输出包含：
+
+- 每个接收、拆包、解码、时间线、编码和输出节点；
+- 数据位于普通内存还是 NVIDIA 显存；
+- 当前使用输入时钟还是独立节目时钟；
+- 每条队列的容量和满载策略；
+- 节点是已经实现、adapter 已就绪，还是仍然 pending。
+
+只验证配置和图，不打开网络与 GPU：
+
+```bash
+cargo run -p aimedia -- run -f examples/single-srt.yaml --dry-run
+```
+
+## 3. 检查 Linux GPU 环境
+
+生产目标环境是 Linux x86_64、Docker、NVIDIA GPU、兼容驱动和 NVIDIA Container
+Toolkit。Video Codec SDK 13.0 只在构建 GPU 后端时需要。
 
 ```bash
 docker run --rm --gpus all \
@@ -31,66 +53,62 @@ docker run --rm --gpus all \
   nvidia/cuda:12.8.1-base-ubuntu24.04 nvidia-smi
 ```
 
-这一步失败表示 Docker/GPU 环境还没有准备好，不是 SRT 或导播配置问题。
-
-## 3. 准备配置
-
-单路从 `examples/single-srt.yaml` 开始；体验双路控制协议时复制
-`examples/director.yaml`。修改 SRT URI 后，密码不能直接写入 YAML：
+然后运行：
 
 ```bash
-export AIMEDIA_SRT_WIDE_PASSPHRASE='replace-me'
-export AIMEDIA_SRT_CLOSE_PASSPHRASE='replace-me'
-export AIMEDIA_SRT_OUTPUT_PASSPHRASE='replace-me'
+cargo run -p aimedia -- doctor --json
 ```
 
-先只检查配置和图：
+GPU 容器检查失败说明 Docker、驱动或 Toolkit 尚未准备好，不是媒体配置问题。
+
+## 4. 体验当前有界调度器
+
+mock 模式会运行节目时钟、队列、状态和控制协议，但不会收发真实媒体：
 
 ```bash
-aimedia explain -f examples/single-srt.yaml
-aimedia run -f examples/single-srt.yaml --dry-run
+cargo run -p aimedia -- run -f examples/single-srt.yaml --mock
 ```
 
-单路配置的 `state --json` 返回 `mode: single`。此模式没有选镜对象，`take` 和
-`auto` 会稳定返回 `notApplicable`，这不是输入故障。
-
-## 4. 启动当前可用的调度器和人工切镜
-
-当前先用 mock 模式体验节目时钟、状态和控制协议；它不会收发媒体：
+另一个终端查看状态：
 
 ```bash
-aimedia run -f director.yaml --mock
+cargo run -p aimedia -- control state --json
 ```
 
-另开一个终端查看状态或切镜：
+单输入作业没有切换目标，`take` 和 `auto` 返回 `notApplicable` 是预期行为。
+
+当前不带 `--mock` 的 `run` 会返回 `nativeVideoBackendPending`。这表示配置、图、TS、
+SRT 和 AAC 基础存在，但 NVDEC/NVENC 与生产调度器还没有完成接线。
+
+## 5. 可选导播示例
+
+双输入自动导播不再是核心产品前提，但状态机和回放工具继续作为 Analyzer Tap 与策略
+隔离的参考实现：
 
 ```bash
-aimedia control state --json
-aimedia control take --input close --hold-ms 5000
-aimedia control auto
+cargo run -p aimedia -- replay examples/replay.jsonl -f examples/director.yaml
+cargo run -p aimedia -- bench -f examples/director.yaml \
+  --capture examples/replay.jsonl --iterations 1000
 ```
 
-`hold-ms 0` 表示保持人工模式，直到执行 `auto`。不可用或不同步的目标机位会返回 `targetUnavailable`。
+## 6. 常见问题
 
-当前不带 `--mock` 的 `aimedia run` 会明确退出。libxaac 帧级处理已经完成，但
-NVDEC/NVENC 和 codec 到 scheduler 的真实数据面还没有接通。后续支持真实流时，
-本节才会替换为生产启动命令。
+### 配置仍然叫 DirectorPipeline
 
-## 5. 常见问题
+这是 v0.1 配置适配层。新 `MediaJob` 配置会在执行计划接管真实单路链路后引入，避免
+现在同时维护两个未闭环运行时。
 
 ### 配置提示包含敏感参数
 
-从 SRT URI 删除 `passphrase`、`password`、`token` 或 `secret`，改用 `secretRef.env` 或 `secretRef.file`。
-
-### Take 被拒绝
-
-运行 `aimedia control state --json`，检查目标机位的 `healthy`、`synchronized`、`frozen` 和 `skewMs`。偏差超过配置上限时拒绝切入是保护行为。
-
-### 设计中的“两路都断开”行为
-
-实时数据面接通后，管线应保持最后一张健康画面并输出静音，同时尝试重连；若输出端
-持续不可恢复或 codec/GPU 失败，进程应明确退出。当前 mock 模式不能验证这一行为。
+从 URI 删除 `passphrase`、`password`、`token` 或 `secret`，改用 `secretRef.env` 或
+`secretRef.file`。
 
 ### 找不到 NVIDIA SDK
 
-核心和 CPU 测试不需要 SDK。只有启用 `nvidia` 特性时才需要按构建说明提供 SDK 13.0；SDK 压缩包和头文件不会提交到项目仓库。
+图编译器、CPU 测试和 fake backend 不需要 SDK。只有启用 NVIDIA codec feature 时才
+需要按构建说明提供 SDK 13.0；SDK 压缩包和头文件不会提交到仓库。
+
+### Windows workspace 检查失败
+
+真实 transport 与 GPU 基线是 Linux。Windows 可运行纯 Rust 的图和 parser 测试；完整
+workspace 和 native 数据面使用 Linux/Docker CI 验证。

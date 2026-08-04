@@ -1,6 +1,6 @@
 [package]
 name = "aimedia-runtime"
-description = "Bounded dual-camera scheduler and local control plane for aimedia"
+description = "Bounded media job scheduler and local control plane for aimedia"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,8 +9,9 @@ authors.workspace = true
 repository.workspace = true
 
 [dependencies]
-aimedia-core = { version = "0.1.0-alpha.1", path = "../aimedia-core" }
-aimedia-mpegts = { version = "0.1.0-alpha.1", path = "../aimedia-mpegts" }
+aimedia-core = { version = "0.1.0-alpha.1", path = "../core" }
+aimedia-graph = { version = "0.1.0-alpha.1", path = "../graph" }
+aimedia-mpegts = { version = "0.1.0-alpha.1", path = "../mpegts" }
 serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true

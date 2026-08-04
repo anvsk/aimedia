@@ -1,6 +1,6 @@
 [package]
 name = "aimedia-core"
-description = "Core types, scheduling, synchronization, and AI director logic for aimedia"
+description = "Media, time, control, and extension contracts for aimedia"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

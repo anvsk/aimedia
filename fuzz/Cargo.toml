@@ -8,8 +8,8 @@ edition = "2024"
 cargo-fuzz = true
 
 [dependencies]
-aimedia-core = { path = "../crates/aimedia-core" }
-aimedia-mpegts = { path = "../crates/aimedia-mpegts" }
+aimedia-core = { path = "../crates/core" }
+aimedia-mpegts = { path = "../crates/mpegts" }
 libfuzzer-sys = "0.4"
 
 [[bin]]

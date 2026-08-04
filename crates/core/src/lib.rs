@@ -1,4 +1,4 @@
-//! Core contracts and deterministic scheduling for the aimedia live director.
+//! Core media, time, control, and extension contracts for the aimedia runtime.
 //!
 //! This crate deliberately contains no FFmpeg bindings. Media transports, codecs, inference
 //! engines, and hardware accelerators attach through explicit backend traits.
