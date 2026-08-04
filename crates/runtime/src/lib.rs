@@ -14,6 +14,7 @@ use aimedia_core::{
     OutputRuntimeState, PipelineConfig, PipelineMode, PipelineRuntimeState, QueueRuntimeState,
     SrtRuntimeStats, SwitchReason, backend::CodecId, config::parse_socket_mode,
 };
+pub use aimedia_graph::QueueCapacities;
 use thiserror::Error;
 use tokio::sync::Mutex;
 
@@ -37,41 +38,6 @@ pub enum RuntimeError {
     UnsafeSocketPath(PathBuf),
     #[error("control server task failed: {0}")]
     Join(String),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct QueueCapacities {
-    pub video_frames: usize,
-    pub audio_blocks: usize,
-    pub transport_messages: usize,
-    pub encoded_messages: usize,
-}
-
-impl QueueCapacities {
-    #[must_use]
-    pub fn from_config(config: &PipelineConfig) -> Self {
-        let buffer_ms = config.sync.buffer_ms;
-        let fps = u64::from(config.media.video.fps);
-        let video_frames = ceil_div(buffer_ms.saturating_mul(fps), 1_000)
-            .saturating_add(2)
-            .clamp(4, 256) as usize;
-        let audio_blocks = ceil_div(
-            buffer_ms.saturating_mul(u64::from(config.media.audio.sample_rate)),
-            1_024 * 1_000,
-        )
-        .saturating_add(2)
-        .clamp(4, 512) as usize;
-        Self {
-            video_frames,
-            audio_blocks,
-            transport_messages: video_frames.saturating_mul(8).clamp(32, 2_048),
-            encoded_messages: video_frames.saturating_mul(8).clamp(32, 2_048),
-        }
-    }
-}
-
-const fn ceil_div(value: u64, divisor: u64) -> u64 {
-    value.saturating_add(divisor - 1) / divisor
 }
 
 /// Independent output clock. Video uses a rational accumulator; audio uses exact sample counts.

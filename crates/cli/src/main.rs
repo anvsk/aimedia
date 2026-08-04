@@ -11,23 +11,20 @@ use aimedia_core::{
     config::{SrtConfig, SrtMode},
     vlm::VlmAdvice,
 };
+use aimedia_graph::{ExecutionPlan, compile as compile_plan};
 use aimedia_mpegts::{DemuxEvent, ProgramMap, StreamDemuxer, probe_path};
 use aimedia_nvidia::NvidiaLibraries;
-use aimedia_runtime::{QueueCapacities, run_mock_pipeline, send_control_request};
+use aimedia_runtime::{run_mock_pipeline, send_control_request};
 use aimedia_srt::{Endpoint, SrtTransport, probe_version as probe_srt_version};
 use anyhow::{Context, Result, bail};
 use clap::{ArgAction, Parser, Subcommand, ValueEnum};
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::json;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
 #[derive(Debug, Parser)]
-#[command(
-    name = "aimedia",
-    version,
-    about = "AI-native dual-camera live director"
-)]
+#[command(name = "aimedia", version, about = "Service-native live media runtime")]
 struct Cli {
     #[arg(short, long, action = ArgAction::Count, global = true)]
     verbose: u8,
@@ -49,7 +46,7 @@ enum Command {
         #[arg(long, default_value_t = 3_000)]
         duration_ms: u64,
     },
-    /// Validate and run a director pipeline.
+    /// Validate and run a media job.
     Run {
         #[arg(short = 'f', long)]
         file: PathBuf,
@@ -110,7 +107,7 @@ enum ControlAction {
     },
     /// Return control to the automatic director.
     Auto,
-    /// Read current camera, health, synchronization, and transport state.
+    /// Read current input, health, synchronization, and transport state.
     State {
         #[arg(long)]
         json: bool,
@@ -395,7 +392,7 @@ fn redact_uri_userinfo(uri: &str) -> String {
 
 async fn command_run(path: &Path, dry_run: bool, mock: bool) -> Result<()> {
     let config = load_config(path)?;
-    let graph = explain_graph(&config);
+    let graph = compile_graph(&config)?;
     if dry_run {
         println!("{}", serde_json::to_string_pretty(&graph)?);
         info!(pipeline = %config.metadata.name, "configuration and graph are valid");
@@ -483,53 +480,45 @@ fn request_id() -> String {
 
 fn command_explain(path: &Path, output_json: bool) -> Result<()> {
     let config = load_config(path)?;
-    let graph = explain_graph(&config);
+    let graph = compile_graph(&config)?;
     if output_json {
         println!("{}", serde_json::to_string_pretty(&graph)?);
     } else {
-        println!("pipeline: {}", config.metadata.name);
+        println!("job: {}", graph.job);
+        println!("mode: {:?}", graph.mode);
         println!(
-            "profile: {}x SRT/MPEG-TS H.264+AAC -> {} -> 1x SRT/MPEG-TS H.264+AAC",
-            config.inputs.len(),
-            if config.inputs.len() == 1 {
-                "program clock"
-            } else {
-                "director"
-            }
+            "resources: {} decode session(s), {} encode session; bounded queues={}, AI on hot path={}",
+            graph.resources.gpu_decode_sessions,
+            graph.resources.gpu_encode_sessions,
+            graph.resources.all_queues_bounded,
+            graph.resources.ai_on_hot_path
         );
-        println!(
-            "sync: master input {}, buffer {}ms, max skew {}ms",
-            config.sync.master_input, config.sync.buffer_ms, config.sync.max_skew_ms
-        );
-        if config.inputs.len() == 2 {
+        println!("nodes:");
+        for node in &graph.nodes {
             println!(
-                "director: min shot {}ms, margin {:.2}, candidate hold {}ms, cooldown {}ms",
-                config.director_policy.min_shot_ms,
-                config.director_policy.score_margin,
-                config.director_policy.candidate_hold_ms,
-                config.director_policy.cooldown_ms
+                "  {:<20} {:<16?} {:<14?} {}",
+                node.id, node.kind, node.status, node.description
             );
-        } else {
-            println!("director: not applicable to a single-input pipeline");
         }
-        println!(
-            "VLM: {:?}, weight {:.2}, deadline {}ms; never on the media hot path",
-            config.vlm_advisor.mode, config.vlm_advisor.weight, config.vlm_advisor.deadline_ms
-        );
-        println!(
-            "audio: {}ms equal-power switch, target {:.1} LUFS, peak {:.1} dBFS",
-            config.audio_switch.crossfade_ms,
-            config.audio_switch.target_lufs,
-            config.audio_switch.true_peak_dbfs
-        );
-        println!("graph:");
-        for node in graph["nodes"].as_array().into_iter().flatten() {
+        println!("edges:");
+        for edge in &graph.edges {
             println!(
-                "  {:<18} {:<14} {}",
-                node["id"].as_str().unwrap_or("?"),
-                node["memory"].as_str().unwrap_or("?"),
-                node["description"].as_str().unwrap_or("?")
+                "  {:<20} -> {:<20} {:?}/{:?}/{:?}, queue={} {:?}",
+                edge.from,
+                edge.to,
+                edge.contract.media,
+                edge.contract.memory,
+                edge.contract.clock,
+                edge.queue.capacity,
+                edge.queue.full_policy
             );
+        }
+        let pending = graph
+            .pending_nodes()
+            .map(|node| node.id.as_str())
+            .collect::<Vec<_>>();
+        if !pending.is_empty() {
+            println!("pending backends: {}", pending.join(", "));
         }
     }
     Ok(())
@@ -655,120 +644,8 @@ fn execute_replay(
     Ok(result)
 }
 
-fn explain_graph(config: &PipelineConfig) -> Value {
-    let capacities = QueueCapacities::from_config(config);
-    let pipeline_mode = if config.inputs.len() == 1 {
-        "single"
-    } else {
-        "dual"
-    };
-    let mut nodes = Vec::new();
-    for (index, input) in config.inputs.iter().enumerate() {
-        nodes.extend([
-            json!({
-                "id": format!("srt-input-{index}"),
-                "input": input.name,
-                "memory": "CPU",
-                "queueCapacity": capacities.transport_messages,
-                "description": "runtime-loaded libsrt 1.5 caller/listener adapter"
-            }),
-            json!({
-                "id": format!("mpegts-demux-{index}"),
-                "input": input.name,
-                "memory": "CPU",
-                "queueCapacity": capacities.transport_messages,
-                "description": "streaming sync, PSI/PES reassembly and PTS unwrap"
-            }),
-            json!({
-                "id": format!("nvdec-{index}"),
-                "input": input.name,
-                "memory": "CUDA",
-                "queueCapacity": capacities.video_frames,
-                "description": "SDK 13.0 build boundary and RAII surfaces; frame submission pending"
-            }),
-            json!({
-                "id": format!("aac-decode-{index}"),
-                "input": input.name,
-                "memory": "CPU",
-                "queueCapacity": capacities.audio_blocks,
-                "description": "native libxaac AAC-LC to fixed-cadence f32 PCM"
-            }),
-        ]);
-    }
-    if config.inputs.len() == 2 {
-        nodes.extend([
-            json!({
-                "id": "sync-buffer",
-                "memory": "CPU/CUDA",
-                "queueCapacity": capacities.video_frames,
-                "description": format!(
-                    "fixed {}ms buffer; auto pause above {}ms skew",
-                    config.sync.buffer_ms, config.sync.max_skew_ms
-                )
-            }),
-            json!({
-                "id": "director",
-                "memory": "CPU",
-                "description": "deterministic state machine; manual take and health gates"
-            }),
-            json!({
-                "id": "audio-switch",
-                "memory": "CPU",
-                "description": format!(
-                    "{}ms equal-power fade to {:.1} LUFS with 4x true-peak limiting",
-                    config.audio_switch.crossfade_ms, config.audio_switch.target_lufs
-                )
-            }),
-        ]);
-    }
-    nodes.extend([
-        json!({
-            "id": "nvenc",
-            "memory": "CUDA",
-            "queueCapacity": capacities.video_frames,
-            "description": "H.264 frame submission pending"
-        }),
-        json!({
-            "id": "aac-encode",
-            "memory": "CPU",
-            "queueCapacity": capacities.audio_blocks,
-            "description": "native libxaac f32 PCM to AAC-LC ADTS"
-        }),
-        json!({
-            "id": "mpegts-srt-output",
-            "memory": "CPU",
-            "queueCapacity": capacities.encoded_messages,
-            "description": "independent program clock, clean-room TS mux and bounded SRT output"
-        }),
-    ]);
-
-    json!({
-        "apiVersion": config.api_version,
-        "pipeline": config.metadata.name,
-        "mode": pipeline_mode,
-        "inputCount": config.inputs.len(),
-        "hotPathWaitsForVlm": false,
-        "boundedQueues": true,
-        "nodes": nodes,
-        "nativeBackendReady": false,
-        "implementedNow": [
-            "config validation",
-            "timeline and bounded synchronization primitives",
-            "director state machine",
-            "audio loudness, crossfade and 4x true-peak primitives",
-            "OpenAI-compatible VLM advisor",
-            "streaming MPEG-TS demux/mux with PSI/PES and PTS rollover",
-            "runtime-loaded libsrt 1.5 transport boundary",
-            "independent program clock and local Unix socket control",
-            "NVIDIA availability probe and libxaac AAC-LC frame codec",
-            "replay, mock runtime and benchmark harness"
-        ],
-        "pendingForLiveMedia": [
-            "NVDEC/NVENC frame submission and NV12 copy",
-            "codec-to-scheduler data-plane integration",
-            "SRT reconnect, network damage and interoperability qualification"
-        ]
-    })
+fn compile_graph(config: &PipelineConfig) -> Result<ExecutionPlan> {
+    compile_plan(config).context("media job could not be compiled into an execution plan")
 }
 
 #[derive(Debug, Deserialize)]

@@ -14,7 +14,7 @@ default = []
 video-codec-sdk = ["dep:bindgen", "dep:sha2"]
 
 [dependencies]
-aimedia-core = { version = "0.1.0-alpha.1", path = "../aimedia-core" }
+aimedia-core = { version = "0.1.0-alpha.1", path = "../core" }
 libloading.workspace = true
 serde.workspace = true
 thiserror.workspace = true

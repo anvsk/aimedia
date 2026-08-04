@@ -2,76 +2,50 @@
 
 [简体中文](README.md) | English
 
-[![CI](https://github.com/anvsk/aimedia/actions/workflows/ci.yml/badge.svg)](https://github.com/anvsk/aimedia/actions/workflows/ci.yml)
-[![Fuzz](https://github.com/anvsk/aimedia/actions/workflows/fuzz.yml/badge.svg)](https://github.com/anvsk/aimedia/actions/workflows/fuzz.yml)
-[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+`aimedia` is an open-source, service-native live media runtime for developers and integrators.
+Declare inputs, outputs, quality, latency, and failure policy; the runtime compiles an inspectable,
+bounded execution plan and keeps the media job running.
 
-`aimedia` is an open-source, AI-native production and publishing engine for live-media
-developers and integrators. It receives camera or remote contribution feeds, performs
-directing, audio processing, and encoding, then publishes one continuous program to a live
-platform or cloud service. Its long-term goal is to replace FFmpeg inside explicit market
-workflows, not to claim unfinished all-format compatibility.
+It is not a full-format FFmpeg rewrite. The near-term goal is to replace common FFmpeg subprocess,
+shell, and supervisor glue in live services while exposing a non-blocking path for AI analysis.
 
-> Development preview: streaming TS, the SRT adapter, libxaac frame processing, the program clock,
-> and the local control plane are in Phase 2. NVDEC/NVENC frame submission and the complete live
-> data plane are not closed yet.
+## Why it is different
 
-## What works today
+- Intent is compiled into typed media nodes instead of being expanded into an opaque command.
+- `aimedia explain` reports media type, memory domain, clock domain, queue policy, and GPU sessions.
+- Reconnects, backpressure, fault boundaries, structured state, and shutdown are runtime concerns.
+- Source timestamps are mapped onto an independent monotonic program clock.
+- AI taps are sampled side paths and can never be required for media output to stay alive.
 
-- Strict `aimedia/v1alpha1` YAML validation with secret references.
-- Monotonic program timestamps and fixed-capacity synchronization primitives.
-- A two-camera director with minimum shot duration, hysteresis, candidate hold, cooldown, manual take/hold, and health failover.
-- A VLM advisor contract with deadlines, expiry checks, strict JSON output, and a hard 25% score-weight ceiling.
-- 48 kHz BS.1770-style rolling loudness estimation and an 80 ms equal-power audio crossfade.
-- Clean-room streaming MPEG-TS sync, PSI/PES reassembly, PTS rollover, muxing, H.264 Annex-B, and AAC ADTS.
-- An independent program clock, bounded-capacity calculations, drift correction, and a versioned Unix socket control plane.
-- Runtime-loaded libsrt transport with exponential reconnects, plus NVIDIA availability boundaries.
-- Native libxaac AAC-LC frame decoding/encoding with a fixed 1024-sample cadence.
-- One-to-two-input configuration and a single-input control/observability contract.
-- `probe`, `doctor`, `control`, `explain`, `run --dry-run`, `run --mock`, `replay`, and `bench`.
-- Linux fuzz targets for configuration, MPEG-TS, and elementary streams.
+## Current status
 
-## What does not work yet
+The `0.1.0-alpha.1` foundation includes a typed graph compiler, streaming MPEG-TS demux/mux,
+runtime-loaded libsrt and libxaac adapters, a bounded single-input scheduler, program clocks,
+NVIDIA capability boundaries, deterministic switching policy, audio DSP, replay, benchmarks, and
+fuzz targets.
 
-- A connected, continuously encoded SRT media pipeline.
-- NVDEC/NVENC frame submission and GPU surface copies.
-- Continuous scheduling and reconnect behavior across codecs, clock, mux, and SRT.
-- Silero VAD and visual ONNX analyzers.
-- Versioned loadable codec plugin function tables.
-
-The project intentionally refuses to pretend these backends exist: `aimedia run` without `--dry-run` fails clearly until the native media path is linked.
-
-## Try the director core
-
-Rust 1.85 or newer is required.
+Frame-level NVDEC/NVENC, production backend wiring, disconnect keepalive, and the real single-SRT
+GPU loop are still pending. The project does not advertise them as supported yet.
 
 ```bash
-cargo run -p aimedia -- explain -f examples/director.yaml
-cargo run -p aimedia -- run -f examples/director.yaml --dry-run
-cargo run -p aimedia -- replay examples/replay.jsonl -f examples/director.yaml
-cargo run -p aimedia -- bench -f examples/director.yaml \
-  --capture examples/replay.jsonl --iterations 1000
-docker build -t aimedia:dev .
+cargo run -p aimedia -- explain -f examples/single-srt.yaml
+cargo run -p aimedia -- explain -f examples/single-srt.yaml --json
+cargo run -p aimedia -- run -f examples/single-srt.yaml --dry-run
+cargo run -p aimedia -- run -f examples/single-srt.yaml --mock
 ```
 
-## Design rules
+The two-camera director remains available as an optional policy example:
 
-1. The media hot path never waits for a VLM.
-2. Every queue has a fixed capacity and an explicit overflow policy.
-3. Output uses an independent monotonic program clock.
-4. AI produces bounded suggestions; a deterministic state machine makes the final switch.
-5. Media protocols are implemented from public specifications without copying FFmpeg source.
-6. Credentials must be environment-variable or mounted-file references.
-7. A capability is not marked supported before interoperability testing.
+```bash
+cargo run -p aimedia -- replay examples/replay.jsonl -f examples/director.yaml
+```
 
-See the [architecture](docs/architecture.md), [support matrix](docs/support-matrix.md), and [roadmap](docs/roadmap.md). Contributions are welcome, especially around MPEG-TS/PES reassembly, `libsrt`, NVIDIA Video Codec adapters, analyzer test corpora, and interoperability testing.
+Workspace directories use concise contextual names (`core`, `graph`, `runtime`, `srt`), while
+published Cargo package names retain the collision-resistant `aimedia-*` prefix.
 
-Phase 2 documentation is currently maintained in Chinese to keep the solo-project workload
-focused on the native media path: [getting started](docs/getting-started.zh-CN.md),
-[user stories](docs/user-stories.md), [market support](docs/market-support.md),
-[platform presets](docs/platform-presets.md), [glossary](docs/glossary.md), and
-[design rationale](docs/design-rationale.md).
+Read the [architecture RFC](docs/rfcs/0001-intent-media-runtime.md),
+[roadmap](docs/roadmap.md), [user stories](docs/user-stories.md), and
+[support matrix](docs/support-matrix.md).
 
-## License
-
-The core is licensed under Apache-2.0. External transports, codecs, models, and NVIDIA runtimes retain their own licenses. Open-source source-code licenses do not grant H.264 or AAC patent rights; commercial distribution needs an independent legal review.
+The core is Apache-2.0. External transport, codec, model, and NVIDIA components retain their own
+licenses. Open-source licensing does not grant codec patent rights.

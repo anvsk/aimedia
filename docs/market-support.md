@@ -2,7 +2,7 @@
 
 ## 产品边界
 
-`aimedia` 是直播制作与发布引擎，不是观众侧 CDN 或播放器。协议进入核心的条件是：
+`aimedia` 是实时媒体作业运行时，不是观众侧 CDN 或播放器。协议进入核心的条件是：
 
 - 能覆盖至少两个目标平台，或一个明确的区域用户故事；
 - 有公开规范或可审计的依赖边界；
@@ -13,9 +13,9 @@
 
 | 优先级 | 市场 | 输入 | 输出 | Codec 和封装 | 目标里程碑 |
 |---|---|---|---|---|---|
-| P0 | 中外共同 | SRT/MPEG-TS、RTMP/RTMPS | SRT/MPEG-TS、RTMP/RTMPS | H.264/AAC；TS/FLV | v0.2—v0.4 |
-| P1 | 中国大陆 | RTSP/RTP、SRT | RTMP/RTMPS | H.264/H.265 输入；AAC/G.711；H.264/AAC 输出 | v0.6 |
-| P1 | 海外 | SRT/RTMP | RTMPS、WHIP | H.264/AAC；WHIP H.264/Opus | v0.4、v0.7 |
+| P0 | 中外共同 | SRT/MPEG-TS、RTMP/RTMPS | SRT/MPEG-TS、RTMP/RTMPS | H.264/AAC；TS/FLV | v0.2—v0.3 |
+| P1 | 中国大陆 | RTSP/RTP、SRT | RTMP/RTMPS | H.264/H.265 输入；AAC/G.711；H.264/AAC 输出 | v0.3、v0.6 |
+| P1 | 海外 | SRT/RTMP | RTMPS、WHIP | H.264/AAC；WHIP H.264/Opus | v0.3、v0.6+ |
 | P2 | 平台增强 | HLS ingest、Enhanced RTMP | 多编码输出 | HEVC/AV1、CMAF/HLS | 采用数据驱动 |
 | 非核心 | 监控、传统广播、CDN | GB28181、RIST、NDI、SDI | HTTP-FLV、HLS/LL-HLS | AVS3、VP9、字幕、DRM | 插件或长期 |
 

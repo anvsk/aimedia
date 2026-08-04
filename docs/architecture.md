@@ -1,42 +1,95 @@
 # 架构说明
 
-## 数据面
+`aimedia` 是意图驱动的实时媒体运行时。用户声明目标，系统先生成执行计划，再打开
+网络、codec 和 GPU 资源。自动导播是可选策略，不是媒体主链的中心。
 
-目标数据面为：
+## 从目标到持续输出
 
-```text
-2x SRT -> 2x MPEG-TS demux -> 2x NVDEC -> bounded synchronizer
-                                            |-> fast analyzers
-                                            |-> sampled VLM side channel
-                                            `-> deterministic director
-director -> selected GPU frame -> 1x NVENC -> MPEG-TS -> SRT
-director -> selected PCM -> loudness match/crossfade -> AAC -> MPEG-TS
+```mermaid
+flowchart TB
+    SPEC["MediaJob：输入、输出、质量、延迟、故障策略"] --> COMPILER["Graph Compiler：图编译器"]
+    COMPILER --> PLAN["ExecutionPlan：节点、内存、时钟、队列和资源"]
+    PLAN --> PREFLIGHT["Preflight：能力探测和资源准入"]
+    PREFLIGHT --> SUPERVISOR["Supervisor：启动、监控、恢复和停止"]
+
+    subgraph HOT["实时数据平面"]
+        INPUT["输入 SRT / RTSP / RTMP"] --> DEMUX["拆分音视频"]
+        DEMUX --> VDEC["视频解码"]
+        DEMUX --> ADEC["音频解码"]
+        VDEC --> VT["视频节目时间线"]
+        ADEC --> AT["音频节目时间线"]
+        VT --> VENC["视频编码"]
+        AT --> AENC["音频编码"]
+        VENC --> MUX["组合节目流"]
+        AENC --> MUX
+        MUX --> OUTPUT["一个或多个输出"]
+    end
+
+    VDEC -. "抽样，不阻塞" .-> TAP["Analyzer Tap：AI 分析接口"]
+    ADEC -. "抽样，不阻塞" .-> TAP
+    TAP -. "带期限的事件" .-> POLICY["可选策略：字幕、审核、导播等"]
+    POLICY -. "受控决定" .-> VT
+
+    SUPERVISOR --> HOT
+    SUPERVISOR --> OBS["结构化状态、指标和事件"]
 ```
 
-核心 Rust crate 不持有 FFmpeg 类型。外部 transport、codec、GPU 和 inference runtime 通过 `backend` traits 接入；native 插件只暴露版本化 C ABI。
+## 图编译器
 
-## 时钟和同步
+`aimedia-graph` 当前把 v0.1 配置编译成 `aimedia.plan/v1alpha1`。它不会打开 socket 或
+GPU，而是提前回答以下问题：
 
-- 两个输入分别建立 source PTS 到 program timeline 的映射。
-- `offsetMs` 在映射阶段应用，不回写输入 PTS。
-- program encoder 生成唯一、连续、单调的输出 PTS/DTS。
-- 同步器只保留固定容量窗口，超过容量淘汰最旧数据。
-- 目标机位与 master 的 skew 超过 `maxSkewMs` 时不允许自动切入。
-- 时间戳倒退被视为 discontinuity，调用方必须 flush 对应 decoder 和 timeline。
+- 需要哪些 transport、demux、decoder、timeline、encoder 和 output 节点；
+- 数据位于普通内存还是 NVIDIA 显存；
+- 数据仍使用输入时钟，还是已经映射到独立节目时钟；
+- 每条队列容量是多少，队列满时采取什么策略；
+- 需要多少个硬件解码和编码会话；
+- 哪些节点已经实现，哪些只有 adapter，哪些仍然 pending。
 
-## 双层 AI
+`aimedia explain -f examples/single-srt.yaml --json` 输出的就是这份计划。CLI 不再手写
+另一份可能与运行时漂移的拓扑。
 
-快脑处理 VAD、人物、嘴部运动、画质、冻结和传输健康度。它必须在没有 VLM 时独立完成自动导播。
+## 五项一等契约
 
-慢脑通过 OpenAI 兼容 JSON Schema 接口获取两个采样画面和快脑指标。结果具有 deadline 和 expiry，权重上限为 25%。超时、限流、无效 JSON 或服务离线只产生事件，不进入媒体故障路径。
+### 媒体格式
 
-## 音频
+连接两端必须对 MPEG-TS、H.264 access unit、AAC ADTS、NV12 视频帧或 f32 PCM
+达成一致。未来的格式协商在启动前完成，关键链路不依赖运行中猜测。
 
-音频跟随镜头需要两路持续解码为 48kHz 双声道 PCM。切换时先根据 K-weighted 滚动窗口估计增益，再执行 80ms 等功率交叉淡化。当前 DSP 已提供 4x windowed-sinc true-peak 检测和 block limiter；接入 AAC 后还需让相邻 block 共享历史采样，覆盖编码帧边界。
+### 时间
 
-## 安全边界
+输入 PTS 只用于映射。视频和音频进入 timeline 后使用独立、单调的节目时钟。输入
+重启、时间戳回绕或漂移不能直接污染输出时间戳。
 
-- TS、H.264、AAC 和所有配置均视为不可信输入。
-- parser 不得索引未验证长度或创建基于输入声明的无界分配。
-- URI 中禁止明文敏感查询参数；使用环境变量或文件型 `secretRef`。
-- native codec/GPU FFI 崩溃隔离是 Beta 阶段目标，Alpha 先用 sanitizer、fuzz 和受控进程部署。
+### 内存
+
+每帧明确位于主机内存还是 GPU 显存。GPU surface 使用自动释放的 lease，节点不能
+把裸指针或整数 handle 当成永久所有权。图编译器最终应能列出不可避免的内存复制。
+
+### 容量和延迟
+
+所有媒体边都使用有界队列。实时主链默认背压；抽样分析支路可以丢旧数据或只保留
+最新样本，防止 AI 速度决定直播速度。
+
+### 故障
+
+关键节点失败会重连、重建或明确终止作业；非关键 AI 节点失败只产生事件。输出断线
+期间不积累无限历史数据，恢复后重新建立节目边界。
+
+## 当前代码与目标边界
+
+当前已经具备流式 MPEG-TS、SRT adapter、libxaac adapter、节目时钟、有界单路调度、
+本机控制协议和首版图编译器。NVDEC/NVENC 帧提交、生产后端接线和真实单路持续输出
+仍未完成，因此图中的视频 codec 节点保持 `pending`。
+
+下一步不是继续增加协议，而是让单路 SRT 作业真正由执行计划驱动并完成 Linux +
+NVIDIA 数据闭环。完成后再扩展 RTSP 输入、RTMPS 输出、多输出和 AI Tap。
+
+## 扩展边界
+
+- transport、codec 和 GPU 节点走本地稳定 ABI，避免热路径复制；
+- AI analyzer 和策略通过有期限的事件交互，不直接持有节目时钟；
+- 自动导播保留为可选策略和示例；
+- WebAssembly 只考虑用于元数据和策略插件，不用于传递原始 GPU 视频帧。
+
+完整决策见 [RFC 0001](rfcs/0001-intent-media-runtime.md)。

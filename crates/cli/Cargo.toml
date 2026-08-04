@@ -1,0 +1,33 @@
+[package]
+name = "aimedia"
+description = "Service-native live media runtime CLI"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "aimedia"
+path = "src/main.rs"
+
+[dependencies]
+aimedia-aac = { version = "0.1.0-alpha.1", path = "../aac" }
+aimedia-core = { version = "0.1.0-alpha.1", path = "../core" }
+aimedia-graph = { version = "0.1.0-alpha.1", path = "../graph" }
+aimedia-mpegts = { version = "0.1.0-alpha.1", path = "../mpegts" }
+aimedia-nvidia = { version = "0.1.0-alpha.1", path = "../nvidia" }
+aimedia-runtime = { version = "0.1.0-alpha.1", path = "../runtime" }
+aimedia-srt = { version = "0.1.0-alpha.1", path = "../srt" }
+anyhow.workspace = true
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+tokio.workspace = true
+
+[lints]
+workspace = true

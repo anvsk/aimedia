@@ -1,113 +1,90 @@
 # 市场驱动路线图
 
-`aimedia` 面向直播开发者和集成商，负责接收摄像机或远程贡献流，完成导播、音频
-处理和编码，再把连续节目发布到直播平台或直播云。项目不建设观众侧 CDN、播放器
-或直播源站。
+`aimedia` 的目标不是覆盖 FFmpeg 的所有格式，而是替代开发者在实时媒体服务中常见的
+FFmpeg 子进程、Shell 拼接和外部守护逻辑：协议接入、格式归一化、转码、多路发布、
+故障恢复、监控和 AI 分析接入。
 
-路线图按可完成的用户工作流组织，而不是按 crate 数量组织。每个里程碑只有在以下
-条件同时满足后才能升级支持状态：
+每个版本必须完成至少一个真实用户故事、两个外部实现互操作和一组量化门槛。没有
+真实账号、测试流或兼容证据的能力只能标记为 `experimental`。
 
-1. 完成至少一个已记录的用户故事；
-2. 与至少两个独立外部实现互操作；
-3. 达到该阶段的延迟、稳定性和资源上限；
-4. 兼容证据写入支持矩阵；未验证组合保持 `experimental`。
+## v0.1 Foundation：已完成基础
 
-## 当前基线：v0.1 Foundation
+- 严格配置、密钥引用和版本化本机控制协议；
+- 流式 MPEG-TS demux/mux、H.264 Annex-B 和 AAC ADTS；
+- libsrt adapter、重连状态、独立节目时钟和有界队列；
+- libxaac 帧级 adapter、NVIDIA SDK 探测和 GPU surface 所有权契约；
+- fake backend 单路调度、导播策略、音频 DSP、replay、bench 和 fuzz。
 
-已完成：
+这些是开发基础，不代表真实 GPU 数据面已经闭环。
 
-- 严格的 `aimedia/v1alpha1` 配置、密钥引用和版本化本机控制协议；
-- 流式 MPEG-TS 同步恢复、PSI/PES、PTS 回绕、PAT/PMT/PCR mux；
-- libsrt 1.5.5 caller/listener 回环、指数退避重连、独立节目时钟和有界队列原语；
-- NVIDIA Video Codec SDK 13.0、CUDA/NVDEC/NVENC 和 libxaac 可用性探测；
-- libxaac AAC-LC 帧级编码/解码、`aimedia-core` backend adapter、固定
-  1024-sample cadence 和 native round-trip；
-- 一到两路输入配置、单路状态、`notApplicable` 控制错误，以及队列/codec/GPU/SRT
-  可观测性契约；
-- 可注入后端的单路有界调度器，已用 fake codec/transport 验证 TS 任意分块、独立
-  节目时钟、编码复用、队列水位和受控排空；
-- 确定性导播、音频 DSP、VLM contract、replay、bench、fuzz 和 CPU CI。
+## v0.2 Native Live Pipe：当前目标
 
-当前尚不能完成真实直播闭环。生产 SRT/NVDEC/NVENC/libxaac 后端尚未接入调度器，
-NVDEC/NVENC 帧提交以及断流保活也仍未完成。
-
-## v0.2 Native Single-SRT
-
-目标工作流：
+完成首个可替代工作流：
 
 ```text
-1x SRT/MPEG-TS -> NVDEC + AAC decode -> independent program clock
+1x SRT/MPEG-TS -> NVDEC + AAC decode -> program timeline
                -> NVENC + AAC encode -> MPEG-TS/SRT
 ```
 
-主要交付：
+同时完成：
 
-- 允许一到两路输入；先启用单路真实 `aimedia run`；
-- Video Codec SDK 13.0 named build context、头文件指纹和帧级 NVDEC/NVENC；
-- libxaac AAC-LC 48kHz 双声道帧级解码和编码；
-- 输入/输出 SRT 重连、黑帧/最后一帧与静音保活；
-- OBS/FFmpeg 输入和 VLC/OBS/ffprobe 输出互操作。
+- 简洁 workspace 目录和 `aimedia-graph` 图编译器；
+- `aimedia explain` 输出类型、内存、时钟、队列和资源计划；
+- 生产 SRT/codec/scheduler 接线；
+- 输入断线最后一帧加静音保活，恢复后等待 IDR；
+- 输出重连后重新发送 PAT/PMT 并请求 IDR。
 
-完成门槛：
+完成门槛：1080p30 两小时、引擎新增延迟 p95 不超过 180ms、时间戳单调、内存不持续
+增长、OBS/FFmpeg 输入与 VLC/OBS/ffprobe 输出互操作，运行镜像没有 FFmpeg/libav。
 
-- 1080p30 连续运行两小时；
-- 引擎新增延迟 p95 不超过 180ms，不包含 SRT latency；
-- PTS、DTS、PCR 单调，输入断线不要求输出播放器重连；
-- RSS 和 GPU 内存不持续增长，运行镜像没有 `ffmpeg` 或 `libav*`。
+## v0.3 Live Normalize and Bridge
 
-## v0.3 Dual Manual Director
+目标用户故事：直播后端开发者把不同现场输入稳定归一化并发布到国内外平台。
 
-- 两路持续解码、偏移、漂移校正和有界 timeline；
-- 人工 Take/Auto、视频硬切、输出 IDR、音频跟随和 80ms 淡化；
-- 当前路断流自动切备用，超出允许 skew 的机位不可切入；
-- 健康 Take p95 小于 100ms，切镜不触发播放器重连。
+- RTSP、SRT 和 RTMP 输入，SRT 和 RTMPS 输出；
+- H.265 输入转 H.264 输出；
+- 720p/1080p、25/30/50/60fps、横竖屏；
+- 44.1/48kHz、单/双声道归一化；
+- 腾讯云、阿里云、YouTube 非公开直播和 Twitch bandwidth test 互操作；
+- 输入、codec 和输出故障分阶段错误及结构化指标。
 
-达到门槛后发布 Developer Preview。
+这一阶段不开发桌面 GUI，也不加入任意滤镜语言。
 
-## v0.4 Cross-region Platform Baseline
+## v0.4 Fan-out and AI Tap
 
-- RTMP/RTMPS publish/ingest 和 FLV tag demux/mux；
-- 720p/1080p、25/30/50/60fps、横竖屏和 H.264 Main/High；
-- 44.1/48kHz AAC 输入归一化；
-- `srt-low-latency`、`cn-rtmp-standard`、`youtube-rtmps` 和
-  `twitch-rtmp` 预设；
-- 腾讯云、阿里云、YouTube 非公开直播和 Twitch bandwidth test 互操作。
+- 一次解码供多个输出复用，支持每个输出独立失败和重连；
+- 非阻塞视频抽样、PCM、传输指标和时间事件接口；
+- analyzer deadline、采样率、权限和隐私配置；
+- mock analyzer 与字幕、审核、精彩片段三个参考扩展；
+- AI 变慢十倍或完全离线时，节目帧率和主链延迟不显著变化。
 
-没有真实账号验证的抖音、快手和 Bilibili 组合保持 `experimental`。
+双机位自动导播迁移为这一接口上的官方示例，不再是版本发布前提。
 
-## v0.5 Fast-brain AI Alpha
+## v0.5 Media Job Service
 
-- Silero VAD、人物/人脸、嘴部运动、清晰度、曝光、冻结和传输健康度；
-- 将实时指标转换为 `CameraSnapshot`，复用确定性状态机；
-- 在 VLM 完全关闭时独立达到自动切镜误切和响应时间指标。
+- `POST /v1/jobs`、状态、更新、停止和事件 API；
+- 多作业 GPU session、显存和带宽准入；
+- 输出配置热更新，尽量不重启输入和共享解码；
+- Prometheus/OpenTelemetry、优雅 drain、24 小时 soak；
+- 容器镜像、SBOM、升级策略和生产部署文档。
 
-## v0.6 China Profile
+## v0.6 Regional Profiles
 
-- 独立 `aimedia-rtsp` 边界，支持 RTSP/RTP TCP/UDP；
-- H.264/H.265 视频及 AAC/G.711 音频输入；
-- 竖屏模板、腾讯云/阿里云示例和摄像机兼容矩阵；
-- H.265 优先作为输入，节目发布仍以 H.264/AAC RTMP/RTMPS 为基线。
+中国大陆优先验证 RTSP 摄像机、H.265 输入、腾讯云和阿里云 RTMP/RTMPS。海外优先
+验证 SRT/RTMP 输入、YouTube/Twitch RTMPS；WHIP 在至少两个真实服务可测试后进入。
 
-GB28181 和厂商专有 ARTC/RTS 保持插件或后续候选，不进入核心。
+GB28181、厂商专有 ARTC/RTS、RIST、NDI、SDI、HLS CDN、AVS3、DRM 和播放器不进入
+当前核心路线，只有真实采用数据足够时才以插件或独立里程碑评估。
 
-## v0.7 Global Low-latency Profile
+## v0.7 Extension SDK and Beta
 
-- 标准 WHIP 输出、H.264/Opus、ICE/DTLS/SRTP 和 STUN/TURN；
-- Bearer token 使用 secret reference，不进入 URI、配置明文或日志；
-- 与 OBS 及至少两个独立 WHIP 服务互操作。
+- transport、codec 与 GPU 的版本化 native ABI；
+- analyzer、policy 和事件扩展 SDK；
+- VLM adapter、deadline、熔断和隐私控制；
+- 24 小时 soak、故障注入、兼容矩阵和稳定配置升级路径。
 
-HLS ingest、HEVC/AV1 和 Enhanced RTMP 只在出现真实采用证据后排期。
+## 长期判断标准
 
-## v0.8 VLM SDK 与 Production Beta
-
-- OpenAI 兼容 VLM advisor、本地模型示例、deadline、熔断和隐私控制；
-- `FastAnalyzer`、`DirectorAdvisor` 版本化 C ABI；
-- 24 小时 soak、Prometheus、SBOM、升级策略和生产部署文档。
-
-## 明确不做
-
-- 完整 FFmpeg CLI 或全格式兼容；
-- 观众侧 HTTP-FLV、HLS/LL-HLS CDN 和播放器；
-- 短期内支持 GB28181、RIST、NDI、SDI、AVS3、VP9、字幕或 DRM；
-- 隐式 CPU codec fallback；
-- 在有真实双机位闭环前开发桌面 GUI。
+新增功能必须至少满足一项：完成高频市场工作流、减少一次昂贵转码或内存复制、降低
+运维故障率、让 AI 安全接入实时主链。仅仅因为 FFmpeg 支持某格式，不构成 aimedia
+实现它的理由。

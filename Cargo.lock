@@ -17,6 +17,7 @@ version = "0.1.0-alpha.1"
 dependencies = [
  "aimedia-aac",
  "aimedia-core",
+ "aimedia-graph",
  "aimedia-mpegts",
  "aimedia-nvidia",
  "aimedia-runtime",
@@ -61,6 +62,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "aimedia-graph"
+version = "0.1.0-alpha.1"
+dependencies = [
+ "aimedia-core",
+ "serde",
+ "thiserror",
+]
+
+[[package]]
 name = "aimedia-mpegts"
 version = "0.1.0-alpha.1"
 dependencies = [
@@ -86,6 +96,7 @@ name = "aimedia-runtime"
 version = "0.1.0-alpha.1"
 dependencies = [
  "aimedia-core",
+ "aimedia-graph",
  "aimedia-mpegts",
  "async-trait",
  "bytes",

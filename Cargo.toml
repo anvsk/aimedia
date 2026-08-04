@@ -1,12 +1,13 @@
 [workspace]
 members = [
-    "crates/aimedia-cli",
-    "crates/aimedia-aac",
-    "crates/aimedia-core",
-    "crates/aimedia-mpegts",
-    "crates/aimedia-nvidia",
-    "crates/aimedia-runtime",
-    "crates/aimedia-srt",
+    "crates/aac",
+    "crates/cli",
+    "crates/core",
+    "crates/graph",
+    "crates/mpegts",
+    "crates/nvidia",
+    "crates/runtime",
+    "crates/srt",
 ]
 exclude = ["fuzz"]
 resolver = "2"
