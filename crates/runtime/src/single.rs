@@ -78,6 +78,17 @@ impl SingleQueuePlan {
                 "the shared encoded queue requires equal video/audio capacities, got {video_output} and {audio_output}"
             )));
         }
+        let video_frames = plan_queue_capacity(
+            plan,
+            "video.decode.0",
+            "video.timeline",
+            FullPolicy::KeepLatest,
+        )?;
+        if video_frames != 1 {
+            return Err(RuntimePlanError::Invariant(format!(
+                "the latest-video slot requires capacity 1, got {video_frames}"
+            )));
+        }
         Ok(Self {
             transport_messages: plan_queue_capacity(
                 plan,
@@ -97,12 +108,7 @@ impl SingleQueuePlan {
                 "audio.decode.0",
                 FullPolicy::Backpressure,
             )?,
-            video_frames: plan_queue_capacity(
-                plan,
-                "video.decode.0",
-                "video.timeline",
-                FullPolicy::Backpressure,
-            )?,
+            video_frames,
             audio_frames: plan_queue_capacity(
                 plan,
                 "audio.decode.0",
@@ -111,6 +117,70 @@ impl SingleQueuePlan {
             )?,
             encoded_messages: video_output,
         })
+    }
+}
+
+// Live video is sampled on the program clock. Retaining older decoded frames only increases
+// latency and pins scarce NVDEC mappings, so the timeline owns exactly one replaceable frame.
+struct LatestVideoSlot {
+    frame: Mutex<Option<VideoFrame>>,
+    sender_open: AtomicBool,
+    receiver_open: AtomicBool,
+}
+
+struct LatestVideoSender {
+    slot: Arc<LatestVideoSlot>,
+}
+
+struct LatestVideoReceiver {
+    slot: Arc<LatestVideoSlot>,
+}
+
+fn latest_video_slot(capacity: usize) -> (LatestVideoSender, LatestVideoReceiver) {
+    debug_assert_eq!(capacity, 1);
+    let slot = Arc::new(LatestVideoSlot {
+        frame: Mutex::new(None),
+        sender_open: AtomicBool::new(true),
+        receiver_open: AtomicBool::new(true),
+    });
+    (
+        LatestVideoSender {
+            slot: Arc::clone(&slot),
+        },
+        LatestVideoReceiver { slot },
+    )
+}
+
+impl LatestVideoSender {
+    async fn replace(&self, frame: VideoFrame) -> Result<bool, ()> {
+        if !self.slot.receiver_open.load(Ordering::Acquire) {
+            return Err(());
+        }
+        let mut current = self.slot.frame.lock().await;
+        if !self.slot.receiver_open.load(Ordering::Acquire) {
+            return Err(());
+        }
+        Ok(current.replace(frame).is_some())
+    }
+}
+
+impl Drop for LatestVideoSender {
+    fn drop(&mut self) {
+        self.slot.sender_open.store(false, Ordering::Release);
+    }
+}
+
+impl LatestVideoReceiver {
+    async fn take(&self) -> (Option<VideoFrame>, bool) {
+        let frame = self.slot.frame.lock().await.take();
+        let sender_open = self.slot.sender_open.load(Ordering::Acquire);
+        (frame, sender_open)
+    }
+}
+
+impl Drop for LatestVideoReceiver {
+    fn drop(&mut self) {
+        self.slot.receiver_open.store(false, Ordering::Release);
     }
 }
 
@@ -205,7 +275,7 @@ impl SinglePipeline {
         let (transport_tx, transport_rx) = mpsc::channel(queues.transport_messages);
         let (video_packet_tx, video_packet_rx) = mpsc::channel(queues.video_packets);
         let (audio_packet_tx, audio_packet_rx) = mpsc::channel(queues.audio_packets);
-        let (video_frame_tx, video_frame_rx) = mpsc::channel(queues.video_frames);
+        let (video_frame_tx, video_frame_rx) = latest_video_slot(queues.video_frames);
         let (audio_frame_tx, audio_frame_rx) = mpsc::channel(queues.audio_frames);
         let (encoded_tx, encoded_rx) = mpsc::channel(queues.encoded_messages);
         let request_idr = Arc::new(AtomicBool::new(true));
@@ -401,6 +471,23 @@ async fn send_observed<T>(
     Ok(())
 }
 
+async fn send_latest_video(
+    sender: &LatestVideoSender,
+    frame: VideoFrame,
+    controller: &ControllerHandle,
+    queue: &str,
+) -> Result<(), SinglePipelineError> {
+    let replaced = sender
+        .replace(frame)
+        .await
+        .map_err(|()| SinglePipelineError::ChannelClosed(queue.to_owned()))?;
+    if replaced {
+        controller.record_input_drop(CodecId::H264).await;
+    }
+    controller.observe_queue(queue, 1).await;
+    Ok(())
+}
+
 async fn receive_transport(
     mut input: Box<dyn Transport>,
     sender: mpsc::Sender<TransportChunk>,
@@ -566,7 +653,7 @@ async fn route_demux_events(
 async fn decode_video(
     mut decoder: Box<dyn VideoDecoder>,
     mut receiver: mpsc::Receiver<MediaPacket>,
-    sender: mpsc::Sender<VideoFrame>,
+    sender: LatestVideoSender,
     controller: ControllerHandle,
     input_queue: String,
     output_queue: String,
@@ -585,13 +672,13 @@ async fn decode_video(
         let frames = decoder.decode(packet).await?;
         controller.record_decoded(CodecId::H264, frames.len()).await;
         for frame in frames {
-            send_observed(&sender, frame, &controller, &output_queue).await?;
+            send_latest_video(&sender, frame, &controller, &output_queue).await?;
         }
     }
     let frames = decoder.flush().await?;
     controller.record_decoded(CodecId::H264, frames.len()).await;
     for frame in frames {
-        send_observed(&sender, frame, &controller, &output_queue).await?;
+        send_latest_video(&sender, frame, &controller, &output_queue).await?;
     }
     Ok(())
 }
@@ -627,7 +714,7 @@ async fn decode_audio(
 #[allow(clippy::too_many_arguments)]
 async fn encode_video(
     mut encoder: Box<dyn VideoEncoder>,
-    mut receiver: mpsc::Receiver<VideoFrame>,
+    receiver: LatestVideoReceiver,
     sender: mpsc::Sender<MediaPacket>,
     clock: Arc<Mutex<ProgramClock>>,
     request_idr: Arc<AtomicBool>,
@@ -642,12 +729,13 @@ async fn encode_video(
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     loop {
         ticker.tick().await;
-        match receiver.try_recv() {
-            Ok(frame) => last_frame = Some(frame),
-            Err(mpsc::error::TryRecvError::Empty) => {}
-            Err(mpsc::error::TryRecvError::Disconnected) => break,
+        let (frame, sender_open) = receiver.take().await;
+        if let Some(frame) = frame {
+            last_frame = Some(frame);
+            controller.observe_queue(&input_queue, 0).await;
+        } else if !sender_open {
+            break;
         }
-        controller.observe_queue(&input_queue, receiver.len()).await;
         let Some(mut frame) = last_frame.clone() else {
             continue;
         };
@@ -1014,8 +1102,9 @@ mod tests {
         let state = pipeline.run().await.expect("pipeline completes");
         assert!(!state.running);
         assert_eq!(state.inputs[0].codec.video_decoded_frames, 2);
+        assert_eq!(state.inputs[0].codec.video_dropped_frames, 1);
         assert_eq!(state.inputs[0].codec.audio_decoded_frames, 2);
-        assert_eq!(state.output.video_encoded_frames, 2);
+        assert_eq!(state.output.video_encoded_frames, 1);
         assert_eq!(state.output.audio_encoded_frames, 2);
         assert!(state.queues.iter().all(|queue| queue.depth == 0));
         assert!(
@@ -1046,7 +1135,7 @@ mod tests {
                 }
             }
         }
-        assert_eq!(video_pts, vec![0, 3_000]);
+        assert_eq!(video_pts, vec![0]);
         assert_eq!(audio_pts, vec![0, 1_920]);
         assert!(video_pts.windows(2).all(|pair| pair[0] < pair[1]));
         assert!(audio_pts.windows(2).all(|pair| pair[0] < pair[1]));

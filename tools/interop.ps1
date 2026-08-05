@@ -6,7 +6,7 @@ param(
     [string]$AptMirror = "",
     [ValidateRange(4, 120)]
     [int]$DurationSeconds = 8,
-    [ValidateSet("all", "matrix", "ll", "lc", "cl", "cc", "netem", "corrupt", "desktop", "obs", "obs-input", "obs-output", "vlc")]
+    [ValidateSet("all", "matrix", "ll", "lc", "cl", "cc", "netem", "corrupt", "backlog", "desktop", "obs", "obs-input", "obs-output", "vlc")]
     [string]$Suite = "all",
     [switch]$SkipToolBuild,
     [switch]$KeepContainers
@@ -366,6 +366,78 @@ function Invoke-Scenario {
         outputRttMs = $state.output.srt.rttMs
         outputPacketsLost = $state.output.srt.packetsLost
         outputPacketsRetransmitted = $state.output.srt.packetsRetransmitted
+        videoPackets = $probe.videoPackets
+        audioPackets = $probe.audioPackets
+        firstVideoKeyframe = $probe.firstVideoKeyframe
+        monotonicPtsDts = $probe.monotonicPtsDts
+    })
+}
+
+function Invoke-BacklogScenario {
+    $scenarioRoot = Join-Path $runRoot "backlog"
+    $null = New-Item -ItemType Directory -Path $scenarioRoot
+    $engine = "am-$runId-backlog-engine"
+    $producer = "am-$runId-backlog-source"
+    $receiver = "am-$runId-backlog-sink"
+    $configPath = Join-Path $scenarioRoot "job.yaml"
+    $delaySeconds = 4
+    Write-JobConfig -Path $configPath -InputMode caller -OutputMode listener `
+        -InputPort 9001 -OutputPort 10000 -Producer $producer -Receiver $receiver
+
+    Start-Producer -Name $producer -PeerMode listener -Engine $engine -Port 9001 `
+        -Seconds ($DurationSeconds + $delaySeconds + 2)
+    Start-TestContainer -Name $engine -Arguments @(
+        "--network", $network, "--gpus", "all",
+        "-e", "NVIDIA_DRIVER_CAPABILITIES=compute,video,utility",
+        "-v", "${configPath}:/config/job.yaml:ro",
+        $EngineImage, "run", "-f", "/config/job.yaml"
+    )
+    Start-Sleep -Seconds $delaySeconds
+    Start-Receiver -Name $receiver -PeerMode caller -Engine $engine -Port 10000 `
+        -ScenarioRoot $scenarioRoot
+
+    $state = Wait-ControlState -Engine $engine -TimeoutSeconds 40 -RequireConnected
+    Start-Sleep -Seconds 3
+    $state = Wait-ControlState -Engine $engine -TimeoutSeconds 20 -RequireConnected
+    $timeline = $state.queues | Where-Object {
+        $_.from -eq "video.decode.0" -and $_.to -eq "video.timeline"
+    } | Select-Object -First 1
+    if ($null -eq $timeline -or $timeline.capacity -ne 1 -or $timeline.fullPolicy -ne "keepLatest") {
+        throw "backlog scenario did not run with the capacity-1 keepLatest video slot"
+    }
+    if ($state.inputs[0].codec.videoDroppedFrames -lt 1) {
+        throw "backlog scenario did not exercise latest-frame replacement"
+    }
+    if ($state.inputs[0].gpu.highWatermark -gt $state.inputs[0].gpu.capacity) {
+        throw "NVDEC surface high watermark exceeded its declared capacity"
+    }
+
+    $sourceExit = Wait-ContainerExit -Name $producer `
+        -TimeoutSeconds ($DurationSeconds + $delaySeconds + 25)
+    Start-Sleep -Seconds 1
+    $engineExit = Stop-Engine -Name $engine
+    $sinkExit = Wait-ContainerExit -Name $receiver -TimeoutSeconds 20 -AllowFailure
+    $probe = Read-OutputProbe -ScenarioRoot $scenarioRoot
+    $engineLogs = Invoke-Docker -Arguments @("logs", $engine) -Capture
+    if (($engineLogs -join [Environment]::NewLine) -match "cuvidMapVideoFrame64 failed") {
+        throw "delayed output peer still exhausted NVDEC mapped surfaces"
+    }
+
+    $results.Add([pscustomobject]@{
+        scenario = "backlog-recovery"
+        inputMode = "caller"
+        outputMode = "listener"
+        delayedOutputSeconds = $delaySeconds
+        sourceExit = $sourceExit
+        engineExit = $engineExit
+        sinkExit = $sinkExit
+        inputConnected = $state.inputs[0].srt.connected
+        outputConnected = $state.output.srt.connected
+        videoDroppedFrames = $state.inputs[0].codec.videoDroppedFrames
+        gpuSurfaceCapacity = $state.inputs[0].gpu.capacity
+        gpuSurfaceHighWatermark = $state.inputs[0].gpu.highWatermark
+        timelineCapacity = $timeline.capacity
+        timelinePolicy = $timeline.fullPolicy
         videoPackets = $probe.videoPackets
         audioPackets = $probe.audioPackets
         firstVideoKeyframe = $probe.firstVideoKeyframe
@@ -794,6 +866,9 @@ try {
     }
     if ($Suite -in @("all", "corrupt")) {
         $corruptResult = Invoke-CorruptProbe
+    }
+    if ($Suite -in @("all", "backlog")) {
+        Invoke-BacklogScenario
     }
     if ($Suite -in @("all", "desktop", "obs", "obs-input")) {
         Invoke-ObsSend

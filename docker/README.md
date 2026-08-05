@@ -126,6 +126,20 @@ VLC 的 SRT input module 位于 Ubuntu 的 `vlc-plugin-access-extra`，不能只
 `vlc --version` 判断 SRT 可用。脚本先检查插件文件，再通过 raw dump 保存 aimedia
 原始 TS；这样 ffprobe 检查的是引擎时间戳，而不是 VLC 重新 mux 后的时间戳。
 
+延迟输出端回归可以单独运行：
+
+```powershell
+pwsh ./tools/interop.ps1 `
+  -EngineImage aimedia:gpu `
+  -PeerImage aimedia:test-tools `
+  -Suite backlog `
+  -SkipToolBuild
+```
+
+该场景先建立 caller input 并延迟 4 秒连接 output listener，要求视频时间线报告
+`capacity=1`、`fullPolicy=keepLatest`，至少替换一个过期帧，且 NVDEC surface 高水位
+不超过容量。最终输出仍必须从 IDR 开始且 PTS/DTS 单调。
+
 首个组合会在引擎、发送端和接收端的网络命名空间各注入 20ms 延迟、
 20ms 抖动和 1% 丢包，形成约 40ms RTT 的双向损伤链路；它需要测试容器的
 `NET_ADMIN` capability，不修改宿主机网络。国内构建机

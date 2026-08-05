@@ -625,17 +625,22 @@ fn controller_queue_states(
             (format!("input.{index}"), format!("demux.{index}")),
             (format!("demux.{index}"), format!("video.decode.{index}")),
             (format!("demux.{index}"), format!("audio.decode.{index}")),
-            (format!("video.decode.{index}"), "video.timeline".to_owned()),
             (format!("audio.decode.{index}"), "audio.timeline".to_owned()),
         ] {
             plan_queue_capacity(plan, &from, &to, FullPolicy::Backpressure)?;
         }
+        plan_queue_capacity(
+            plan,
+            &format!("video.decode.{index}"),
+            "video.timeline",
+            FullPolicy::KeepLatest,
+        )?;
     }
     let video_timeline = plan_queue_capacity(
         plan,
         "video.timeline",
         "video.encode",
-        FullPolicy::Backpressure,
+        FullPolicy::KeepLatest,
     )?;
     let audio_timeline = plan_queue_capacity(
         plan,
@@ -666,7 +671,7 @@ fn controller_queue_states(
             plan,
             "video.decode.0",
             "video.timeline",
-            FullPolicy::Backpressure,
+            FullPolicy::KeepLatest,
         )?;
         let input_audio = plan_queue_capacity(
             plan,
