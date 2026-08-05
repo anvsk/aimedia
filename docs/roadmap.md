@@ -138,7 +138,10 @@ v0.3 工程。只有 V2-11 也完成后，总览才把 v0.2 标记为完全完�
   - [x] V3-02A：契约、依赖审查、MediaJob RTSP schema 与 fixture 语料。
     证据：PR [#26](https://github.com/anvsk/aimedia/pull/26)，严格 Clippy、core/graph
     12 项测试、RTSP/SRT 字段隔离与 H.264/AAC、H.265/G.711、损坏 SDP fixtures。
-  - [ ] V3-02B：短目录 `crates/rtsp` 的会话、鉴权、SDP 和类型化媒体事件。
+  - [x] V3-02B：短目录 `crates/rtsp` 的会话、鉴权、SDP 和类型化媒体事件。
+    证据：PR [#27](https://github.com/anvsk/aimedia/pull/27)，Rust 1.88 workspace 门禁、
+    cargo-deny 全项通过、Docker smoke，以及 `DESCRIBE/SETUP/PLAY/RTP/TEARDOWN`
+    本机伪摄像机闭环。
   - [ ] V3-02C：TCP interleaved H.264/AAC/G.711 单路运行时闭环。
   - [ ] V3-02D：UDP RTP/RTCP、固定重排窗口、超时和重连。
   - [ ] V3-02E：H.265 RTP 重组、明确 bridge pending 与 V3-04 handoff。

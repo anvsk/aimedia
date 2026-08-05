@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.88.0
         with:
           components: clippy,rustfmt
       - uses: Swatinem/rust-cache@v2
@@ -43,7 +43,7 @@ jobs:
           repository: FFmpeg/nv-codec-headers
           ref: e844e5b26f46bb77479f063029595293aa8f812d
           path: .ci/nvcodec
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.88.0
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2

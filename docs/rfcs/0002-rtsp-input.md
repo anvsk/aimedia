@@ -29,8 +29,8 @@ H.264 + AAC/G.711 会在 V3-02 形成真实单路闭环。H.265 在本阶段完�
   主要成本；
 - retina 已用于 ONVIF RTSP/1.0 摄像机场景，具备 Basic/Digest、TCP interleaved、
   UDP RTP、RTCP，以及 H.264、H.265、AAC 和 G.711 depacketizer；
-- 其许可证为 MIT/Apache-2.0，Rust 1.88 与当前 Docker builder 一致；workspace 目前声明
-  的 MSRV 仍是 1.85，V3-02B 引入依赖时必须显式升级并同步文档，不能隐式抬高；运行时
+- 其许可证为 MIT/Apache-2.0，V3-02B 已将 workspace MSRV 和 Docker builder
+  统一为 Rust 1.88，不会隐式依赖更新编译器；运行时
   不引入 FFmpeg、GStreamer 或 `libav*`；
 - 独立 adapter 可固定我们自己的事件、错误和重连契约，未来更换实现不改变 MediaJob。
 

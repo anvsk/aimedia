@@ -30,6 +30,7 @@
 - `aimedia-graph`：把现有配置编译为类型化、有界的执行计划；
 - 流式 MPEG-TS demux/mux、PSI/PES、PTS 回绕、PAT/PMT/PCR；
 - libsrt caller/listener adapter、重连状态和敏感信息校验；
+- `retina 0.4.19` 后的 RTSP/RTP 会话边界、SDP 轨道选择和类型化媒体事件；
 - libxaac AAC-LC 帧级 adapter、1024-sample 时间线和 native round-trip；
 - 独立节目时钟、固定容量单路调度器、fake transport/codec 验证；
 - NVIDIA SDK 探测、实验性 NVDEC/NVENC 帧后端、GPU 内 NV12 复制与代际 surface lease、
@@ -51,7 +52,7 @@
 
 ## 快速体验
 
-要求 Rust 1.85 或更新版本。CPU 环境可以检查配置和执行计划：
+要求 Rust 1.88 或更新版本。CPU 环境可以检查配置和执行计划：
 
 ```bash
 cargo run -p aimedia -- explain -f examples/single-srt.yaml
@@ -88,6 +89,7 @@ crates/
   mpegts/    clean-room MPEG-TS
   nvidia/    CUDA、NVDEC、NVENC 边界
   runtime/   有界执行器和作业控制
+  rtsp/      RTSP/RTP 输入边界
   srt/       libsrt adapter
 ```
 
