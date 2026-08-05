@@ -101,10 +101,16 @@ TCP 会话恢复由 `crates/rtsp` 内部完成：读超时、对端断流或可�
 [当前 main 文档](https://github.com/scottlamb/retina/blob/main/src/client/mod.rs#L1052-L1067)
 作为实时复核入口。
 
-所以 V3-02D2 的完成条件不是“Retina UDP 开关能收包”，而是乱序包在 sequence/loss
-判定和 depacketize 之前进入固定容量、固定等待时间的重排窗口。实现时优先向上游提交小而
-可审查的补丁；在它进入可固定版本之前，aimedia 只能使用明确记录 commit 和差异的临时
-fork，不复制整个 RTSP 实现，也不降级验收标准。
+上游 [issue #40](https://github.com/scottlamb/retina/issues/40) 仍未完成。早期
+[原型 PR #107](https://github.com/scottlamb/retina/pull/107) 的实测结论是：现有 jitter
+buffer 对视频的假设不成立，且没有重传机制时常会引入延迟而收益很小；未合并的
+[PR #111](https://github.com/scottlamb/retina/pull/111) 还会在一次输入释放多个缓存结果时
+遗失部分结果，不可直接依赖。
+
+因此 v0.3 把 UDP 从发布阻塞项改为需求触发的延后项，并继续在 native runtime 明确拒绝，
+不降级成“局域网上可能能用”的虚假支持。若真实摄像机或客户数据证明 UDP 为必须，恢复时的
+完成条件仍是：sequence/loss 判定和 depacketize 之前具备按流隔离、固定容量和固定等待时间的
+重排窗口，通过网络损伤实验后才能升为 `experimental`。
 
 ## MediaJob 契约
 

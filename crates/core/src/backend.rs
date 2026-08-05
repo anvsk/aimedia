@@ -13,6 +13,7 @@ use crate::{
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CodecId {
     H264,
+    H265,
     AacLc,
     G711Alaw,
     G711Mulaw,
