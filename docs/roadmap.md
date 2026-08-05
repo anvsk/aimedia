@@ -110,7 +110,8 @@
   首尾窗口 +2.5MiB，设备显存 178→178MiB，运行镜像无 FFmpeg/libav。延迟 4 秒连接
   output listener 的回归同样零丢帧且未再出现 NVDEC 205。
 - [ ] **V2-10 发布**：更新支持矩阵和 `docs/reports/v0.2-native-live-pipe.md`，创建 tag、
-  GitHub Release、可复现实验命令和演示素材。
+  GitHub Release、可复现实验命令和演示素材。Release candidate：PR
+  [#20](https://github.com/anvsk/aimedia/pull/20)；只有合并、tag 和附件实际创建后才勾选。
 - [ ] **V2-11 社区发布**：发布 Hacker News 与一个最相关 Reddit 社区，清楚列出支持与
   pending；记录链接、反馈主题和路线图调整，不通过灌水获取社区权限。
 
