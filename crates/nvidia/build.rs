@@ -66,9 +66,9 @@ fn generate_sdk_bindings() {
         .clang_arg(format!("-I{}", header_set.include.display()))
         .allowlist_function("(cuvid|NvEncodeAPI|NvEnc).*")
         .allowlist_type(
-            "(CUVID|CUvideo|cudaVideo|NV_ENC|GUID|CUcontext|CUstream|CUdeviceptr|CUdevice|CUresult|tcuvid|tcu).*")
+            "(CUVID|CUvideo|cudaVideo|NV_ENC|GUID|CUDA_MEMCPY2D|CUmemorytype|CUcontext|CUstream|CUdeviceptr|CUdevice|CUresult|tcuvid|tcu).*")
         .allowlist_var(
-            "(CUDA_VIDEO|NV_ENC|NVENC|NVENCAPI|CUVID|CUVID_PKT|CU_CTX|CUvideopacketflags|cudaVideo).*",
+            "(CUDA_VIDEO|NV_ENC|NVENC|NVENCAPI|CUVID|CUVID_PKT|CU_CTX|CU_MEMORYTYPE|CUvideopacketflags|cudaVideo).*",
         )
         .derive_debug(false)
         .derive_default(false)

@@ -86,6 +86,7 @@ dependencies = [
  "aimedia-core",
  "async-trait",
  "bindgen",
+ "bytes",
  "libloading",
  "serde",
  "sha2",

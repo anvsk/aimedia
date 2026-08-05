@@ -27,7 +27,7 @@
 | 多输出与 Analyzer Tap | planned | v0.4；每个支路独立有界并与媒体主链隔离 |
 | WHIP output | planned | v0.6 以后按真实服务采用证据评估；H.264/Opus |
 | NVDEC | experimental | H.264 parser callback、NV12 map/unmap、代际 surface lease、discontinuity/IDR 闸门已实现；RTX 5060 Laptop、577.12 驱动通过单 IDR 实机解码，尚未接运行时或长稳 |
-| NVENC | foundation | SDK 13.0 driver probe 和通用 RAII surface 契约已实现；帧级编码在 V2-04 |
+| NVENC | experimental | H.264 Main、CBR 6Mbps、无 B 帧、1 秒默认 GOP、持久注册 NV12 surface、强制 IDR/SPS/PPS 和 EOS 已实现；RTX 5060 Laptop、577.12 驱动完成 NVDEC→NVENC→NVDEC 实机往返，尚未接生产运行时或长稳 |
 | AAC-LC via libxaac | foundation | 48kHz 双声道、128kbps ADTS 帧级 encode/decode、core backend adapter、flush、固定 cadence 和 native round-trip 已测；待接单路调度器与长稳 |
 | Silero VAD / 视觉 ONNX | planned | ONNX Runtime adapter |
 | REST/WebSocket 作业控制面 | planned | v0.5 Media Job Service |

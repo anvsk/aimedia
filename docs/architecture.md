@@ -79,8 +79,10 @@ GPU，而是提前回答以下问题：
 ## 当前代码与目标边界
 
 当前已经具备流式 MPEG-TS、SRT adapter、libxaac adapter、节目时钟、有界单路调度、
-本机控制协议、首版图编译器和实验性 NVDEC 帧级后端。NVENC、生产后端接线和真实
-单路持续输出仍未完成，因此执行计划中的生产视频 codec 链仍保持 `pending`。
+本机控制协议、首版图编译器和实验性 NVDEC/NVENC 帧级后端。两个视频 worker 共享
+同一设备的 CUDA primary context，NVDEC 映射的 NV12 帧可在 GPU 内复制到持久注册的
+NVENC surface；生产后端接线和真实单路持续输出仍未完成，因此执行计划中的生产视频
+codec 链仍保持 `pending`。
 
 下一步不是继续增加协议，而是让单路 SRT 作业真正由执行计划驱动并完成 Linux +
 NVIDIA 数据闭环。完成后再扩展 RTSP 输入、RTMPS 输出、多输出和 AI Tap。
