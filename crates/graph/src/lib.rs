@@ -16,7 +16,7 @@ pub enum CompileError {
     #[error("the current graph compiler supports one or two inputs, got {0}")]
     InputCount(usize),
     #[error(
-        "input {input:?} declares RTSP correctly, but the RTSP graph adapter is pending V3-02B"
+        "input {input:?} declares RTSP correctly and the session adapter exists, but runtime graph integration is pending V3-02C"
     )]
     RtspAdapterPending { input: String },
     #[error("input {input:?} uses unsupported transport {uri:?}; only SRT is available now")]
@@ -644,7 +644,7 @@ mod tests {
     }
 
     #[test]
-    fn reports_rtsp_schema_as_valid_but_adapter_pending() {
+    fn reports_rtsp_schema_as_valid_but_runtime_integration_pending() {
         let config = PipelineConfig::from_yaml(include_str!("../../../examples/rtsp.yaml"))
             .expect("RTSP contract should parse before the adapter exists");
         let error = compile(&config).expect_err("RTSP graph must not masquerade as SRT");
