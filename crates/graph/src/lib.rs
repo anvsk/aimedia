@@ -15,6 +15,10 @@ pub enum CompileError {
     InvalidConfig(String),
     #[error("the current graph compiler supports one or two inputs, got {0}")]
     InputCount(usize),
+    #[error(
+        "input {input:?} declares RTSP correctly, but the RTSP graph adapter is pending V3-02B"
+    )]
+    RtspAdapterPending { input: String },
     #[error("input {input:?} uses unsupported transport {uri:?}; only SRT is available now")]
     UnsupportedInputTransport { input: String, uri: String },
     #[error("output uses unsupported transport {0:?}; only SRT is available now")]
@@ -210,6 +214,11 @@ pub fn compile(config: &PipelineConfig) -> Result<ExecutionPlan, CompileError> {
         return Err(CompileError::InputCount(config.inputs.len()));
     }
     for input in &config.inputs {
+        if is_rtsp(&input.uri) {
+            return Err(CompileError::RtspAdapterPending {
+                input: input.name.clone(),
+            });
+        }
         if !is_srt(&input.uri) {
             return Err(CompileError::UnsupportedInputTransport {
                 input: input.name.clone(),
@@ -527,6 +536,11 @@ fn is_srt(uri: &str) -> bool {
         .is_some_and(|scheme| scheme.eq_ignore_ascii_case("srt://"))
 }
 
+fn is_rtsp(uri: &str) -> bool {
+    uri.get(..7)
+        .is_some_and(|scheme| scheme.eq_ignore_ascii_case("rtsp://"))
+}
+
 fn node(
     id: &str,
     kind: NodeKind,
@@ -627,5 +641,13 @@ mod tests {
                 && edge.to == "policy.director"
                 && edge.queue.full_policy == FullPolicy::DropOldest
         }));
+    }
+
+    #[test]
+    fn reports_rtsp_schema_as_valid_but_adapter_pending() {
+        let config = PipelineConfig::from_yaml(include_str!("../../../examples/rtsp.yaml"))
+            .expect("RTSP contract should parse before the adapter exists");
+        let error = compile(&config).expect_err("RTSP graph must not masquerade as SRT");
+        assert!(matches!(error, CompileError::RtspAdapterPending { .. }));
     }
 }

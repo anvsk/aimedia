@@ -106,16 +106,18 @@ impl PipelineConfig {
             } else if !names.insert(input.name.as_str()) {
                 errors.push(format!("{prefix}.name {:?} is duplicated", input.name));
             }
-            validate_srt_uri(&input.uri, &format!("{prefix}.uri"), &mut errors);
+            validate_input_transport(input, &prefix, &mut errors);
             if !(-5_000..=5_000).contains(&input.offset_ms) {
                 errors.push(format!("{prefix}.offsetMs must be between -5000 and 5000"));
             }
-            validate_secret_ref(input.secret_ref.as_ref(), &prefix, &mut errors);
-            validate_srt(&input.srt, &format!("{prefix}.srt"), &mut errors);
         }
 
         validate_srt_uri(&self.output.uri, "outputs[0].uri", &mut errors);
-        validate_secret_ref(self.output.secret_ref.as_ref(), "outputs[0]", &mut errors);
+        validate_secret_ref(
+            self.output.secret_ref.as_ref(),
+            "outputs[0].secretRef",
+            &mut errors,
+        );
         validate_srt(&self.output.srt, "outputs[0].srt", &mut errors);
 
         let video = &self.media.video;
@@ -245,6 +247,47 @@ impl PipelineConfig {
             Err(ConfigError::Validation(errors))
         }
     }
+}
+
+fn validate_input_transport(input: &InputConfig, path: &str, errors: &mut Vec<String>) {
+    if has_scheme(&input.uri, "srt://") {
+        if input.rtsp.is_some() {
+            errors.push(format!("{path}.rtsp must not be set for an srt:// input"));
+        }
+        validate_srt_uri(&input.uri, &format!("{path}.uri"), errors);
+        validate_secret_ref(
+            input.secret_ref.as_ref(),
+            &format!("{path}.secretRef"),
+            errors,
+        );
+        validate_srt(&input.srt, &format!("{path}.srt"), errors);
+        return;
+    }
+
+    if has_scheme(&input.uri, "rtsp://") {
+        if input.secret_ref.is_some() {
+            errors.push(format!(
+                "{path}.secretRef is only for SRT passphrases; use {path}.rtsp.passwordRef"
+            ));
+        }
+        if !input.srt.is_default_contract() {
+            errors.push(format!(
+                "{path}.srt contains non-default values for an rtsp:// input"
+            ));
+        }
+        validate_rtsp_uri(&input.uri, &format!("{path}.uri"), errors);
+        match input.rtsp.as_ref() {
+            Some(config) => validate_rtsp(config, &format!("{path}.rtsp"), errors),
+            None => errors.push(format!(
+                "{path}.rtsp is required for an rtsp:// input so transport and timeout intent are explicit"
+            )),
+        }
+        return;
+    }
+
+    errors.push(format!(
+        "{path}.uri must use a currently declared input scheme: srt:// or rtsp://"
+    ));
 }
 
 #[derive(Debug, Deserialize)]
@@ -527,14 +570,7 @@ fn validate_srt(config: &SrtConfig, path: &str, errors: &mut Vec<String>) {
             "{path}.connectTimeoutMs must be between 100 and 60000"
         ));
     }
-    if config.reconnect.initial_backoff_ms == 0
-        || config.reconnect.initial_backoff_ms > config.reconnect.max_backoff_ms
-        || config.reconnect.max_backoff_ms > 60_000
-    {
-        errors.push(format!(
-            "{path}.reconnect backoff must satisfy 1 <= initialBackoffMs <= maxBackoffMs <= 60000"
-        ));
-    }
+    validate_reconnect(&config.reconnect, &format!("{path}.reconnect"), errors);
     if !matches!(config.key_length, 16 | 24 | 32) {
         errors.push(format!("{path}.keyLength must be 16, 24, or 32"));
     }
@@ -557,6 +593,59 @@ fn validate_srt(config: &SrtConfig, path: &str, errors: &mut Vec<String>) {
     );
 }
 
+fn validate_rtsp(config: &RtspConfig, path: &str, errors: &mut Vec<String>) {
+    if !(100..=60_000).contains(&config.connect_timeout_ms) {
+        errors.push(format!(
+            "{path}.connectTimeoutMs must be between 100 and 60000"
+        ));
+    }
+    if !(500..=120_000).contains(&config.read_timeout_ms) {
+        errors.push(format!(
+            "{path}.readTimeoutMs must be between 500 and 120000"
+        ));
+    }
+    if !(1_000..=300_000).contains(&config.keepalive_ms) {
+        errors.push(format!(
+            "{path}.keepaliveMs must be between 1000 and 300000"
+        ));
+    }
+    validate_reconnect(&config.reconnect, &format!("{path}.reconnect"), errors);
+    validate_secret_ref(
+        config.password_ref.as_ref(),
+        &format!("{path}.passwordRef"),
+        errors,
+    );
+
+    let username_present = config
+        .username
+        .as_deref()
+        .is_some_and(|username| !username.is_empty());
+    let password_present = config.password_ref.is_some();
+    if username_present != password_present {
+        errors.push(format!(
+            "{path}.username and {path}.passwordRef must be set together"
+        ));
+    }
+    if config.username.as_deref().is_some_and(|username| {
+        username.is_empty() || username.len() > 256 || username.contains(['\r', '\n'])
+    }) {
+        errors.push(format!(
+            "{path}.username must be non-empty, at most 256 characters, and contain no line breaks"
+        ));
+    }
+}
+
+fn validate_reconnect(config: &ReconnectConfig, path: &str, errors: &mut Vec<String>) {
+    if config.initial_backoff_ms == 0
+        || config.initial_backoff_ms > config.max_backoff_ms
+        || config.max_backoff_ms > 60_000
+    {
+        errors.push(format!(
+            "{path} backoff must satisfy 1 <= initialBackoffMs <= maxBackoffMs <= 60000"
+        ));
+    }
+}
+
 fn contains_sensitive_stream_id(stream_id: &str) -> bool {
     let lower = stream_id.to_ascii_lowercase();
     ["token=", "secret=", "password=", "passphrase=", "bearer "]
@@ -571,11 +660,11 @@ pub fn parse_socket_mode(value: &str) -> Option<u32> {
 }
 
 fn validate_srt_uri(uri: &str, path: &str, errors: &mut Vec<String>) {
-    if !uri.starts_with("srt://") {
+    if !has_scheme(uri, "srt://") {
         errors.push(format!("{path} must use the srt:// scheme"));
     }
     let authority = uri
-        .strip_prefix("srt://")
+        .get("srt://".len()..)
         .and_then(|rest| rest.split(['/', '?']).next())
         .unwrap_or_default();
     if authority.contains('@') {
@@ -594,6 +683,38 @@ fn validate_srt_uri(uri: &str, path: &str, errors: &mut Vec<String>) {
     }
 }
 
+fn validate_rtsp_uri(uri: &str, path: &str, errors: &mut Vec<String>) {
+    if !has_scheme(uri, "rtsp://") {
+        errors.push(format!("{path} must use the rtsp:// scheme"));
+    }
+    let authority = uri
+        .get("rtsp://".len()..)
+        .and_then(|rest| rest.split(['/', '?']).next())
+        .unwrap_or_default();
+    if authority.is_empty() {
+        errors.push(format!("{path} must include a camera host"));
+    }
+    if authority.contains('@') {
+        errors.push(format!(
+            "{path} contains URI userinfo; use rtsp.username and rtsp.passwordRef"
+        ));
+    }
+    let lower = uri.to_ascii_lowercase();
+    for sensitive in ["password=", "passphrase=", "token=", "secret=", "auth="] {
+        if lower.contains(sensitive) {
+            errors.push(format!(
+                "{path} contains inline credentials; use rtsp.passwordRef"
+            ));
+            break;
+        }
+    }
+}
+
+fn has_scheme(uri: &str, scheme: &str) -> bool {
+    uri.get(..scheme.len())
+        .is_some_and(|actual| actual.eq_ignore_ascii_case(scheme))
+}
+
 fn validate_secret_ref(secret_ref: Option<&SecretRef>, path: &str, errors: &mut Vec<String>) {
     let Some(secret_ref) = secret_ref else {
         return;
@@ -607,9 +728,7 @@ fn validate_secret_ref(secret_ref: Option<&SecretRef>, path: &str, errors: &mut 
         .as_deref()
         .is_some_and(|value| !value.as_os_str().is_empty());
     if env_present == file_present {
-        errors.push(format!(
-            "{path}.secretRef must set exactly one of env or file"
-        ));
+        errors.push(format!("{path} must set exactly one of env or file"));
     }
 }
 
@@ -632,6 +751,8 @@ pub struct InputConfig {
     pub secret_ref: Option<SecretRef>,
     #[serde(default)]
     pub srt: SrtConfig,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rtsp: Option<RtspConfig>,
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
@@ -737,6 +858,18 @@ impl SrtConfig {
             _ => Err(SecretError::InvalidReference),
         }
     }
+
+    fn is_default_contract(&self) -> bool {
+        self.mode.is_none()
+            && self.latency_ms == default_srt_latency()
+            && self.connect_timeout_ms == default_connect_timeout()
+            && self.reconnect.enabled
+            && self.reconnect.initial_backoff_ms == default_initial_backoff()
+            && self.reconnect.max_backoff_ms == default_max_backoff()
+            && self.stream_id.is_none()
+            && self.stream_id_ref.is_none()
+            && self.key_length == default_srt_key_length()
+    }
 }
 
 fn mode_from_uri_query(uri: &str) -> Option<SrtMode> {
@@ -762,6 +895,56 @@ fn mode_from_uri_query(uri: &str) -> Option<SrtMode> {
 pub enum SrtMode {
     Caller,
     Listener,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RtspConfig {
+    #[serde(default)]
+    pub transport: RtspTransport,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub username: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub password_ref: Option<SecretRef>,
+    #[serde(default = "default_connect_timeout")]
+    pub connect_timeout_ms: u64,
+    #[serde(default = "default_rtsp_read_timeout")]
+    pub read_timeout_ms: u64,
+    #[serde(default = "default_rtsp_keepalive")]
+    pub keepalive_ms: u64,
+    #[serde(default)]
+    pub reconnect: ReconnectConfig,
+}
+
+impl Default for RtspConfig {
+    fn default() -> Self {
+        Self {
+            transport: RtspTransport::default(),
+            username: None,
+            password_ref: None,
+            connect_timeout_ms: default_connect_timeout(),
+            read_timeout_ms: default_rtsp_read_timeout(),
+            keepalive_ms: default_rtsp_keepalive(),
+            reconnect: ReconnectConfig::default(),
+        }
+    }
+}
+
+impl RtspConfig {
+    pub fn resolve_password(&self) -> Result<Option<String>, SecretError> {
+        self.password_ref
+            .as_ref()
+            .map(SecretRef::resolve)
+            .transpose()
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RtspTransport {
+    #[default]
+    Tcp,
+    Udp,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -799,6 +982,12 @@ const fn default_initial_backoff() -> u64 {
 }
 const fn default_max_backoff() -> u64 {
     5_000
+}
+const fn default_rtsp_read_timeout() -> u64 {
+    5_000
+}
+const fn default_rtsp_keepalive() -> u64 {
+    15_000
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1144,7 +1333,9 @@ impl Default for FailurePolicyConfig {
 
 #[cfg(test)]
 mod tests {
-    use super::{ConfigError, PipelineConfig, convert_legacy_yaml, validate_srt_uri};
+    use super::{
+        ConfigError, PipelineConfig, RtspTransport, convert_legacy_yaml, validate_srt_uri,
+    };
 
     #[test]
     fn accepts_the_reference_alpha_configuration() {
@@ -1211,5 +1402,42 @@ mod tests {
             validate_srt_uri(uri, "input.uri", &mut errors);
             assert!(!errors.is_empty(), "{uri} must be rejected");
         }
+    }
+
+    #[test]
+    fn accepts_explicit_rtsp_contract_without_treating_it_as_srt() {
+        let yaml = include_str!("../../../examples/rtsp.yaml");
+        let config = PipelineConfig::from_yaml(yaml).expect("RTSP contract should be valid");
+        let rtsp = config.inputs[0]
+            .rtsp
+            .as_ref()
+            .expect("RTSP input keeps protocol-specific settings");
+        assert_eq!(rtsp.transport, RtspTransport::Tcp);
+        assert_eq!(rtsp.read_timeout_ms, 5_000);
+        assert_eq!(
+            rtsp.password_ref
+                .as_ref()
+                .and_then(|reference| reference.env.as_deref()),
+            Some("AIMEDIA_CAMERA_PASSWORD")
+        );
+    }
+
+    #[test]
+    fn rejects_inline_rtsp_credentials_and_cross_protocol_settings() {
+        let yaml = include_str!("../../../examples/rtsp.yaml");
+        let inline = yaml.replace(
+            "rtsp://192.0.2.10/Streaming/Channels/101",
+            "rtsp://admin:secret@192.0.2.10/Streaming/Channels/101?token=secret",
+        );
+        let error = PipelineConfig::from_yaml(&inline).expect_err("URI credentials are rejected");
+        let message = error.to_string();
+        assert!(message.contains("URI userinfo"));
+        assert!(message.contains("inline credentials"));
+
+        let cross_protocol =
+            yaml.replace("    rtsp:\n", "    srt:\n      latencyMs: 240\n    rtsp:\n");
+        let error = PipelineConfig::from_yaml(&cross_protocol)
+            .expect_err("non-default SRT settings cannot leak into RTSP");
+        assert!(error.to_string().contains("non-default values"));
     }
 }

@@ -34,6 +34,11 @@ v0.2 固定 H.264 8-bit 4:2:0、最高 1080p30、AAC-LC 48kHz 双声道。固定
 配置先归一化为内部作业，再由图编译器生成唯一的 `ExecutionPlan`。因此旧格式转换和
 新格式运行不会形成两套 socket、codec 或 GPU 管线。
 
+v0.3 已冻结 RTSP 输入配置和 fixture，可查看 `examples/rtsp.yaml`。当前 V3-02A 只验证
+scheme、TCP/UDP 意图、鉴权引用、超时和协议字段隔离；`explain` 会明确返回
+`RTSP graph adapter is pending V3-02B`，这比把 RTSP 配置误编译成 SRT/MPEG-TS 图更安全。
+等 adapter 与真实数据面完成后，支持矩阵才会从 `planned` 升级。
+
 ## 2. 在 CPU 环境查看执行计划
 
 要求 Rust 1.85 或更新版本：

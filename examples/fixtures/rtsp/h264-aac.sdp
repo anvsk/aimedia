@@ -1,0 +1,15 @@
+v=0
+o=- 3912345678 3912345678 IN IP4 192.0.2.10
+s=H264 AAC camera
+t=0 0
+a=control:*
+m=video 0 RTP/AVP 96
+c=IN IP4 0.0.0.0
+a=rtpmap:96 H264/90000
+a=fmtp:96 packetization-mode=1;profile-level-id=4D001F;sprop-parameter-sets=Z00AH5WoFAFuQA==,aO48gA==
+a=control:trackID=1
+m=audio 0 RTP/AVP 97
+c=IN IP4 0.0.0.0
+a=rtpmap:97 MPEG4-GENERIC/48000/2
+a=fmtp:97 streamtype=5;profile-level-id=1;mode=AAC-hbr;config=1190;sizelength=13;indexlength=3;indexdeltalength=3
+a=control:trackID=2
