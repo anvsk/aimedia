@@ -1,5 +1,5 @@
-apiVersion: aimedia/v1alpha1
-kind: DirectorPipeline
+apiVersion: aimedia/v1alpha2
+kind: MediaJob
 metadata:
   name: single-srt-demo
 
@@ -11,13 +11,17 @@ inputs:
       mode: listener
       latencyMs: 120
 
-output:
-  uri: srt://127.0.0.1:10000
-  srt:
-    mode: caller
-    latencyMs: 120
+processing:
+  timing:
+    masterInput: 0
+    bufferMs: 1000
+    maxSkewMs: 80
 
-sync:
-  masterInput: 0
-  bufferMs: 1000
-  maxSkewMs: 80
+outputs:
+  - name: program
+    uri: srt://127.0.0.1:10000
+    srt:
+      mode: caller
+      latencyMs: 120
+
+taps: []

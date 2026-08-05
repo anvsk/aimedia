@@ -32,11 +32,15 @@ The native single-SRT GPU data plane has passed FFmpeg/OBS/VLC interoperability,
 impairment, disconnect recovery, and a 1080p30 two-hour soak. The fixed single-SRT scope is now
 supported; see the Chinese performance report and support matrix for exact boundaries.
 
+The public configuration is now `aimedia/v1alpha2` `MediaJob`. Legacy `DirectorPipeline` files are
+never loaded silently; migrate them explicitly and review the generated YAML:
+
 ```bash
 cargo run -p aimedia -- explain -f examples/single-srt.yaml
 cargo run -p aimedia -- explain -f examples/single-srt.yaml --json
 cargo run -p aimedia -- run -f examples/single-srt.yaml --dry-run
 cargo run -p aimedia -- run -f examples/single-srt.yaml --mock
+cargo run -p aimedia -- config convert -f examples/v1alpha1.yaml -o media-job.yaml
 ```
 
 The two-camera director remains available as an optional policy example:

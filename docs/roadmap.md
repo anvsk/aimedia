@@ -8,7 +8,9 @@
 
 ## 自主执行规则
 
-1. 始终只推进当前最早未完成的大阶段，不因新协议更有趣而跳过发布门槛。
+1. 始终推进当前最早且前置条件已具备的工程切片，不因新协议更有趣而跳过技术、兼容
+   或发布门槛。社区帖子若因账号资格或审核暂未公开，继续单独追踪且不得伪装完成，
+   但在代码、验证和 Release 已完成后不阻塞下一阶段工程。
 2. 每个技术切片从最新 `main` 创建功能分支，通过独立 PR、CI 和 code review 合并。
 3. 完成切片的同一个 PR 更新本路线图，写明 PR、测试或兼容证据。
 4. 小切片不要求用户逐次确认；只有许可证、外部账号、产品取舍或破坏性操作才暂停询问。
@@ -23,8 +25,8 @@
 |---|---|---|---|
 | v0.1 Foundation | ✅ 完成 | 可测试的媒体基础、fake runtime 和 native adapter | 已进入公开仓库；不宣称真实直播闭环 |
 | Architecture Reset | ✅ 完成 | 通用媒体作业定位、类型化执行图、导播降为可选策略 | PR [#10](https://github.com/anvsk/aimedia/pull/10)；属于内部架构切片，不单独广告 |
-| v0.2 Native Live Pipe | 🚧 进行中 | 一路 SRT 真正原生转码后输出 SRT | tag `v0.2-native-live-pipe`；首轮新定位社区发布 |
-| v0.3 Normalize & Bridge | ⏳ 未开始 | RTSP/SRT/RTMP 输入归一化并发布 SRT/RTMPS | tag `v0.3-normalize-bridge`；中外平台实测帖 |
+| v0.2 Native Live Pipe | 🟨 工程与发布完成，社区待公开 | 一路 SRT 真正原生转码后输出 SRT | tag `v0.2-native-live-pipe` 已发布；V2-11 继续追踪 |
+| v0.3 Normalize & Bridge | 🚧 进行中 | RTSP/SRT/RTMP 输入归一化并发布 SRT/RTMPS | tag `v0.3-normalize-bridge`；中外平台实测帖 |
 | v0.4 Fan-out & AI Tap | ⏳ 未开始 | 一次解码、多路输出、AI 非阻塞接入 | tag `v0.4-ai-tap`；AI SDK 示例发布 |
 | v0.5 Media Job Service | ⏳ 未开始 | API 管理多作业及 GPU 资源 | tag `v0.5-job-service`；部署与运维案例 |
 | v0.6 Regional Profiles | ⏳ 未开始 | 中国大陆与海外主流工作流预设 | 分区域兼容报告，不做未验证平台广告 |
@@ -119,7 +121,9 @@
   首轮结果见[社区发布记录](community-feedback.md)：r/rust 已生成帖子但未进入 `/new`，
   Hacker News 在创建 story 前触发 Show HN 新用户限制；当前无真实反馈，因此保持未完成。
 
-只有 V2-01 至 V2-11 全部完成，v0.2 才能标记完成。
+V2-01 至 V2-10 构成 v0.2 工程与 Release 门槛，已经完成。V2-11 仍是必须履行的公开
+传播义务，但它依赖社区审核和账号资格；保持未完成并定期复查，不再让它无限阻塞
+v0.3 工程。只有 V2-11 也完成后，总览才把 v0.2 标记为完全完成。
 
 ## v0.3 Normalize & Bridge
 

@@ -36,7 +36,8 @@ flowchart TB
 
 ## 图编译器
 
-`aimedia-graph` 当前把 v0.1 配置编译成 `aimedia.plan/v1alpha1`。它不会打开 socket 或
+`aimedia-graph` 当前把 `aimedia/v1alpha2` `MediaJob` 归一化后编译成
+`aimedia.plan/v1alpha1`。它不会打开 socket 或
 GPU，而是提前回答以下问题：
 
 - 需要哪些 transport、demux、decoder、timeline、encoder 和 output 节点；
@@ -78,8 +79,9 @@ GPU，而是提前回答以下问题：
 
 ## 当前代码与目标边界
 
-当前已经具备流式 MPEG-TS、SRT adapter、libxaac adapter、节目时钟、有界单路调度、
-本机控制协议、首版图编译器和实验性 NVDEC/NVENC 帧级后端。两个视频 worker 共享
+当前已经具备 `MediaJob` 配置与显式旧配置转换、流式 MPEG-TS、SRT adapter、libxaac
+adapter、节目时钟、有界单路调度、本机控制协议、首版图编译器和实验性
+NVDEC/NVENC 帧级后端。两个视频 worker 共享
 同一设备的 CUDA primary context，NVDEC 映射的 NV12 帧可在 GPU 内复制到持久注册的
 NVENC surface。单路生产装配已经贯通，执行计划中的生产视频 codec 节点状态为
 `adapterReady`；NVDEC 可同时租出的 surface 数由视频队列容量再加两个在途帧计算，
@@ -87,9 +89,9 @@ NVENC surface。单路生产装配已经贯通，执行计划中的生产视频 
 
 断流保活和输出恢复已经贯通真实 GPU 数据面。运行状态现在直接取自
 `ExecutionPlan`、libsrt 和 NVDEC surface 租约：每条计划边都报告容量、满载策略、
-当前水位和历史高水位，共享一个物理队列的边保持同一水位。下一步不是
-继续增加协议，而是完成外部互操作、网络损伤和两小时稳定性门槛。达到
-v0.2 发布条件后再扩展 RTSP 输入、RTMPS 输出、多输出和 AI Tap。
+当前水位和历史高水位，共享一个物理队列的边保持同一水位。v0.2 的互操作、网络损伤、
+两小时稳定性和 Release 已完成；v0.3 按路线图依次推进 RTSP、RTMP/RTMPS 和格式归一化，
+多输出与通用 AI Tap 仍留在 v0.4。
 
 ## 扩展边界
 

@@ -42,7 +42,8 @@
 
 尚未完成，也不会伪装为已经完成：
 
-- 通用 `MediaJob` v2 配置、多输出和 Analyzer Tap 数据面。
+- 多输出和 Analyzer Tap 数据面。通用 `MediaJob` v2 配置已经取代旧导播配置；旧文件
+  只能通过显式转换命令迁移，不会在运行时静默兼容。
 
 单路 SRT 原生 GPU 数据面已通过 FFmpeg/OBS/VLC 互操作、网络损伤、断流恢复和
 [1080p30 两小时门禁](docs/reports/v0.2-native-live-pipe.md)，在固定支持范围内标记为
@@ -58,6 +59,12 @@ cargo run -p aimedia -- explain -f examples/single-srt.yaml --json
 cargo run -p aimedia -- run -f examples/single-srt.yaml --dry-run
 cargo run -p aimedia -- run -f examples/single-srt.yaml --mock
 cargo run -p aimedia -- doctor --json
+```
+
+迁移旧的 `aimedia/v1alpha1` `DirectorPipeline` 配置：
+
+```bash
+cargo run -p aimedia -- config convert -f old.yaml -o media-job.yaml
 ```
 
 双机位导播已经降为可选扩展示例：

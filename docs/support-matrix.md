@@ -10,7 +10,8 @@
 
 | 能力 | 状态 | 说明 |
 |---|---|---|
-| `aimedia/v1alpha1` 配置 | supported | 严格字段、范围和密钥引用校验；`DirectorPipeline` 是待迁移的 v0.1 适配层 |
+| `aimedia/v1alpha2` `MediaJob` 配置 | supported | 以 `inputs`、`processing`、`outputs`、`taps` 和故障策略表达目标；严格字段、范围和密钥引用校验；当前只允许一个输出 |
+| `aimedia/v1alpha1` `DirectorPipeline` 转换 | supported | `aimedia config convert` 显式生成新 YAML；`run`/`explain` 不静默解析旧配置 |
 | 类型化执行图 | supported | `aimedia-graph` 输出媒体、内存、时钟、队列、资源和节点实现状态；单路执行器从计划读取队列契约，状态以 `from`/`to` 报告每条计划边并对共享物理队列复用同一水位 |
 | 单路/双路配置契约 | foundation | `inputs` 接受 1–2 路；单路 `state` 已接入真实队列、codec 帧/丢帧、NVDEC surface 和输入/输出 SRT 重连指标；双路真实数据面仍待 v0.4 后的策略扩展 |
 | 单路有界媒体调度器 | supported | libsrt、MPEG-TS、NVDEC/NVENC 和 libxaac 已接入 `aimedia run`；RTX 5060 Laptop 上完成断流恢复、FFmpeg/OBS/VLC 互操作、网络损伤和 1080p30 两小时门禁，p95 173ms、零丢帧 |

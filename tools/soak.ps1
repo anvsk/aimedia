@@ -199,8 +199,8 @@ fi
 }
 
 $config = @"
-apiVersion: aimedia/v1alpha1
-kind: DirectorPipeline
+apiVersion: aimedia/v1alpha2
+kind: MediaJob
 metadata:
   name: soak-1080p30
 inputs:
@@ -215,17 +215,7 @@ inputs:
         enabled: true
         initialBackoffMs: 250
         maxBackoffMs: 1000
-output:
-  uri: srt://0.0.0.0:10000
-  srt:
-    mode: listener
-    latencyMs: 20
-    connectTimeoutMs: 10000
-    reconnect:
-      enabled: true
-      initialBackoffMs: 250
-      maxBackoffMs: 1000
-media:
+processing:
   video:
     width: 1920
     height: 1080
@@ -238,10 +228,22 @@ media:
     sampleRate: 48000
     channels: 2
     bitrateKbps: 128
-sync:
-  masterInput: 0
-  bufferMs: 120
-  maxSkewMs: 80
+  timing:
+    masterInput: 0
+    bufferMs: 120
+    maxSkewMs: 80
+outputs:
+  - name: program
+    uri: srt://0.0.0.0:10000
+    srt:
+      mode: listener
+      latencyMs: 20
+      connectTimeoutMs: 10000
+      reconnect:
+        enabled: true
+        initialBackoffMs: 250
+        maxBackoffMs: 1000
+taps: []
 control:
   socketPath: /run/aimedia/aimedia.sock
   socketMode: "0660"
