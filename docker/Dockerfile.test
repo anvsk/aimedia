@@ -1,0 +1,49 @@
+FROM lscr.io/linuxserver/ffmpeg@sha256:38f9befcbb1ceab4980aeb6dccb5b3a9be335094967fd09a0ba3d50882632731 AS source
+
+ARG DEBIAN_FRONTEND=noninteractive
+ARG APT_MIRROR=https://archive.ubuntu.com/ubuntu
+
+RUN sed -i 's|http://archive.ubuntu.com|https://archive.ubuntu.com|g' \
+      /etc/apt/sources.list /etc/apt/sources.list.d/* 2>/dev/null || true; \
+    sed -i "s|https://archive.ubuntu.com/ubuntu|${APT_MIRROR}|g" \
+      /etc/apt/sources.list /etc/apt/sources.list.d/* 2>/dev/null || true; \
+    sed -i 's/^Types: deb deb-src$/Types: deb/' /etc/apt/sources.list.d/*.sources 2>/dev/null || true; \
+    sed -i '/^deb-src /d' /etc/apt/sources.list 2>/dev/null || true
+
+FROM source AS network
+
+RUN set -eux; \
+    sed -i '/ universe /d; s/ main restricted$/ main/' /etc/apt/sources.list; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends iproute2; \
+    rm -rf /var/lib/apt/lists/*
+
+ENTRYPOINT []
+CMD ["bash"]
+
+FROM ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea AS desktop
+
+ARG DEBIAN_FRONTEND=noninteractive
+ARG APT_MIRROR=http://archive.ubuntu.com/ubuntu
+
+RUN set -eux; \
+    sed -i \
+      -e "s|http://archive.ubuntu.com/ubuntu|${APT_MIRROR}|g" \
+      -e "s|http://security.ubuntu.com/ubuntu|${APT_MIRROR}|g" \
+      /etc/apt/sources.list.d/ubuntu.sources; \
+    sed -i 's/^Types: deb deb-src$/Types: deb/' /etc/apt/sources.list.d/ubuntu.sources; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+      dbus-x11 \
+      iproute2 \
+      obs-plugins \
+      obs-studio \
+      python3 \
+      python3-websockets \
+      vlc \
+      vlc-plugin-access-extra \
+      xvfb; \
+    rm -rf /var/lib/apt/lists/*
+
+ENTRYPOINT []
+CMD ["bash"]

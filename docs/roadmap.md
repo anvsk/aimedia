@@ -91,10 +91,17 @@
   严格 Clippy 全绿；RTX 5060 Laptop + 577.12 实测中 12 条计划边全部可查，
   视频/音频时间线深度与共享物理队列一致；输入恢复后 `reconnects=1`，
   输出断开/恢复分别报告 `connected=false/true` 且 `reconnects=1`。
-- [ ] **V2-08 外部互操作**：OBS 与 FFmpeg 作为输入端，VLC、OBS、ffprobe 作为输出端；
+- [x] **V2-08 外部互操作**：OBS 与 FFmpeg 作为输入端，VLC、OBS、ffprobe 作为输出端；
   caller/listener、损坏 TS、1% 丢包、20ms 抖动和 40ms RTT。
+  证据：本 PR 的可重复验收脚本与 [互操作报告](reports/interop.md)。FFmpeg 8.1.2
+  caller/listener 四种组合、损坏 TS 和网络损伤通过；OBS 作为真实输入和实际渲染
+  输出通过；VLC 3.0.20 raw dump 后由 ffprobe 验证 H.264/AAC、首包 keyframe 与
+  PTS/DTS 单调。OBS 本机工具镜像的 teardown crash 与延迟 output listener 触发的
+  NVDEC map 失败均已作为独立已知问题保留，没有隐藏在“通过”结论中。
 - [ ] **V2-09 性能与稳定性**：1080p30 两小时，新增延迟 p95 ≤ 180ms，PTS/DTS/PCR
-  单调，RSS/GPU 内存不持续增长，运行镜像无 FFmpeg/libav。
+  单调，RSS/GPU 内存不持续增长，运行镜像无 FFmpeg/libav；修复输入 caller 已积压时
+  延迟 output listener 连接导致的 `cuvidMapVideoFrame64` 205，并加入 surface 生命周期
+  与延迟接收端回归。
 - [ ] **V2-10 发布**：更新支持矩阵和 `docs/reports/v0.2-native-live-pipe.md`，创建 tag、
   GitHub Release、可复现实验命令和演示素材。
 - [ ] **V2-11 社区发布**：发布 Hacker News 与一个最相关 Reddit 社区，清楚列出支持与
