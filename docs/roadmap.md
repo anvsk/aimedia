@@ -64,8 +64,13 @@
   证据：PR [#12](https://github.com/anvsk/aimedia/pull/12)，固定 SDK 13.0 ABI headers
   的 feature test/严格 Clippy、workspace/fuzz CI 全绿；RTX 5060 Laptop + 577.12 驱动
   通过真实 IDR 解码、NV12 map/unmap、延迟到下一 IDR 的代际重建及跨代 lease 释放。
-- [ ] **V2-04 NVENC 帧级后端**：持久输入 surface、H.264 Main/CBR/无 B 帧/1 秒 GOP、
+- [x] **V2-04 NVENC 帧级后端**：持久输入 surface、H.264 Main/CBR/无 B 帧/1 秒 GOP、
   强制 IDR、SPS/PPS 和 flush。
+  证据：PR [#13](https://github.com/anvsk/aimedia/pull/13)，固定 SDK 13.0 ABI headers
+  的 feature test/严格 Clippy、workspace/fuzz CI 和 Docker `sdk-build-test` 全绿；
+  RTX 5060 Laptop + 577.12 驱动通过 NVDEC NV12 显存帧到持久 NVENC surface 的 GPU
+  内复制、首次及显式强制 IDR、Annex-B/SPS/PPS 输出、EOS flush，并将编码结果重新交给
+  新 NVDEC 实例成功解码。生产运行时接线与长稳仍属于 V2-05 以后。
 - [ ] **V2-05 生产后端装配**：把 libsrt、MPEG-TS、NVDEC/NVENC 和 libxaac 注入单路
   调度器；`aimedia run` 不再返回 `nativeVideoBackendPending`。
 - [ ] **V2-06 断流与输出恢复**：输入断线输出最后健康帧和静音，恢复后等待 IDR；输出
