@@ -34,16 +34,17 @@
 - 独立节目时钟、固定容量单路调度器、fake transport/codec 验证；
 - NVIDIA SDK 探测、实验性 NVDEC/NVENC 帧后端、GPU 内 NV12 复制与代际 surface lease、
   单路生产后端装配和本机控制协议；
+- 输入断流期间按节目时钟重复最后健康画面并输出静音，SRT 恢复后重置 TS/decoder
+  时间线；输出重连丢弃过期包、重发 PAT/PMT 并请求 IDR；
 - 双输入确定性导播、音频 DSP、VLM contract、replay、bench 和 fuzz。
 
 尚未完成，也不会伪装为已经完成：
 
-- 断流期间最后一帧和静音保活；
 - OBS/VLC 等更广互操作、网络损伤测试和两小时 soak；
 - 通用 `MediaJob` v2 配置、多输出和 Analyzer Tap 数据面。
 
-开发分支的 `aimedia run` 已能执行单路 SRT 原生 GPU 数据面，但在故障恢复、兼容覆盖
-和长稳门槛完成前仍只标记为 `experimental`。实时能力以
+开发分支的 `aimedia run` 已能执行带输入/输出恢复的单路 SRT 原生 GPU 数据面，但在
+兼容覆盖和长稳门槛完成前仍只标记为 `experimental`。实时能力以
 [支持矩阵](docs/support-matrix.md)为准。
 
 ## 快速体验

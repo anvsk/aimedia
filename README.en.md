@@ -24,9 +24,10 @@ runtime-loaded libsrt and libxaac adapters, a bounded single-input scheduler, pr
 NVIDIA capability boundaries, deterministic switching policy, audio DSP, replay, benchmarks, and
 fuzz targets.
 
-Frame-level NVDEC/NVENC and the production single-SRT GPU loop now run end to end. Disconnect
-keepalive, broader interoperability, network impairment, and soak gates are still pending, so the
-data plane remains experimental rather than supported.
+Frame-level NVDEC/NVENC and the production single-SRT GPU loop now run end to end. Input gaps keep
+the last healthy frame with silent audio; SRT recovery resets the affected timeline, while output
+recovery drops stale packets, emits fresh PAT/PMT, and requests an IDR. Broader interoperability,
+network impairment, and soak gates are still pending, so the data plane remains experimental.
 
 ```bash
 cargo run -p aimedia -- explain -f examples/single-srt.yaml

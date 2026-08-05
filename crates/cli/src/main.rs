@@ -302,9 +302,13 @@ async fn command_probe_srt(
     let mut program_map: Option<ProgramMap> = None;
 
     while started.elapsed() < deadline {
-        let payload = transport.receive().await?;
-        bytes = bytes.saturating_add(payload.len() as u64);
-        for event in demuxer.push(&payload)? {
+        let chunk = transport.receive().await?;
+        bytes = bytes.saturating_add(chunk.data.len() as u64);
+        if chunk.discontinuity {
+            demuxer = StreamDemuxer::new();
+            discontinuities = discontinuities.saturating_add(1);
+        }
+        for event in demuxer.push(&chunk.data)? {
             match event {
                 DemuxEvent::ProgramMap(map) => program_map = Some(map),
                 DemuxEvent::Packet(_) => media_packets = media_packets.saturating_add(1),

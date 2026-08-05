@@ -14,7 +14,7 @@ use std::{
 
 use aimedia_core::{
     SrtRuntimeStats,
-    backend::{BackendError, Transport},
+    backend::{BackendError, Transport, TransportChunk},
     config::{ReconnectConfig, SecretError, SrtConfig, SrtMode},
 };
 use async_trait::async_trait;
@@ -42,6 +42,7 @@ const SRTO_PAYLOADSIZE: c_int = 49;
 const SRTO_TRANSTYPE: c_int = 50;
 const SRTT_LIVE: c_int = 0;
 const MPEG_TS_PAYLOAD_SIZE: usize = 1_316;
+const NONBLOCKING_RECONNECT_TIMEOUT_MS: u64 = 250;
 
 #[derive(Debug, Error)]
 pub enum SrtError {
@@ -96,14 +97,14 @@ impl From<SrtError> for BackendError {
             SrtError::UnsupportedPlatform | SrtError::Library(_) | SrtError::Symbol { .. } => {
                 Self::Unavailable(error.to_string())
             }
-            SrtError::InvalidUri(_)
-            | SrtError::InvalidPassphrase
-            | SrtError::Secret(_)
-            | SrtError::Resolve(_) => Self::Unsupported(error.to_string()),
+            SrtError::InvalidUri(_) | SrtError::InvalidPassphrase | SrtError::Secret(_) => {
+                Self::Unsupported(error.to_string())
+            }
             SrtError::Closed => Self::EndOfStream,
             SrtError::Poisoned
             | SrtError::Operation { .. }
             | SrtError::Timeout(_)
+            | SrtError::Resolve(_)
             | SrtError::Disconnected
             | SrtError::ReconnectDisabled
             | SrtError::ReconnectPending(_) => Self::Io(error.to_string()),
@@ -890,6 +891,7 @@ impl TransportInner {
 #[derive(Clone)]
 pub struct SrtTransport {
     inner: Arc<Mutex<TransportInner>>,
+    received_reconnects: u64,
 }
 
 impl std::fmt::Debug for SrtTransport {
@@ -908,6 +910,7 @@ impl SrtTransport {
             .map_err(join_error("connect task"))??;
         Ok(Self {
             inner: Arc::new(Mutex::new(TransportInner::connected(endpoint, handle))),
+            received_reconnects: 0,
         })
     }
 
@@ -952,7 +955,12 @@ impl SrtTransport {
                 }
             };
 
-            if let Some(endpoint) = endpoint {
+            if let Some(mut endpoint) = endpoint {
+                if !wait {
+                    endpoint.connect_timeout_ms = endpoint
+                        .connect_timeout_ms
+                        .clamp(1, NONBLOCKING_RECONNECT_TIMEOUT_MS);
+                }
                 let joined =
                     tokio::task::spawn_blocking(move || SocketHandle::connect(&endpoint)).await;
                 let mut guard = self.inner.lock().map_err(|_| SrtError::Poisoned)?;
@@ -1012,7 +1020,7 @@ fn join_error(operation: &'static str) -> impl Fn(tokio::task::JoinError) -> Srt
 
 #[async_trait]
 impl Transport for SrtTransport {
-    async fn receive(&mut self) -> Result<Vec<u8>, BackendError> {
+    async fn receive(&mut self) -> Result<TransportChunk, BackendError> {
         loop {
             self.reconnect_if_due(true)
                 .await
@@ -1028,7 +1036,7 @@ impl Transport for SrtTransport {
                 match result {
                     Ok(payload) => {
                         guard.last_data_at = Some(Instant::now());
-                        Ok(payload)
+                        Ok((payload, guard.reconnects))
                     }
                     Err(error @ SrtError::Timeout(_)) => Err(error),
                     Err(error) => {
@@ -1041,7 +1049,14 @@ impl Transport for SrtTransport {
             .map_err(|error| BackendError::Io(error.to_string()))?;
 
             match result {
-                Ok(payload) => return Ok(payload),
+                Ok((data, reconnects)) => {
+                    let discontinuity = reconnects != self.received_reconnects;
+                    self.received_reconnects = reconnects;
+                    return Ok(TransportChunk {
+                        data,
+                        discontinuity,
+                    });
+                }
                 Err(error) => {
                     let reconnect_enabled = self
                         .inner
@@ -1213,7 +1228,8 @@ mod tests {
             .await
             .expect("first caller sends");
         let (received, mut listener) = idle_receive.await.expect("idle receive task joins");
-        assert_eq!(received, first_payload);
+        assert_eq!(received.data, first_payload);
+        assert!(!received.discontinuity);
         first_caller.close().await.expect("first caller closes");
 
         let observer = listener.clone();
@@ -1245,7 +1261,8 @@ mod tests {
                 .await
                 .expect("reconnect completes before deadline")
                 .expect("listener task joins");
-        assert_eq!(received, second_payload);
+        assert_eq!(received.data, second_payload);
+        assert!(received.discontinuity);
         assert!(stats.connected);
         assert_eq!(stats.reconnects, 1);
         second_caller.close().await.expect("second caller closes");
