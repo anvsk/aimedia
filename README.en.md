@@ -24,8 +24,9 @@ runtime-loaded libsrt and libxaac adapters, a bounded single-input scheduler, pr
 NVIDIA capability boundaries, deterministic switching policy, audio DSP, replay, benchmarks, and
 fuzz targets.
 
-Frame-level NVDEC/NVENC, production backend wiring, disconnect keepalive, and the real single-SRT
-GPU loop are still pending. The project does not advertise them as supported yet.
+Frame-level NVDEC/NVENC and the production single-SRT GPU loop now run end to end. Disconnect
+keepalive, broader interoperability, network impairment, and soak gates are still pending, so the
+data plane remains experimental rather than supported.
 
 ```bash
 cargo run -p aimedia -- explain -f examples/single-srt.yaml

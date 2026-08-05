@@ -62,7 +62,7 @@ cargo run -p aimedia -- doctor --json
 
 GPU 容器检查失败说明 Docker、驱动或 Toolkit 尚未准备好，不是媒体配置问题。
 
-## 4. 体验当前有界调度器
+## 4. 体验有界调度器
 
 mock 模式会运行节目时钟、队列、状态和控制协议，但不会收发真实媒体：
 
@@ -78,8 +78,17 @@ cargo run -p aimedia -- control state --json
 
 单输入作业没有切换目标，`take` 和 `auto` 返回 `notApplicable` 是预期行为。
 
-当前不带 `--mock` 的 `run` 会返回 `nativeVideoBackendPending`。这表示配置、图、TS、
-SRT 和 AAC 基础存在，但 NVDEC/NVENC 与生产调度器还没有完成接线。
+Linux GPU 镜像中，不带 `--mock` 会运行真实单路数据面：
+
+```bash
+docker run --rm --gpus all \
+  -e NVIDIA_DRIVER_CAPABILITIES=compute,utility,video \
+  -v "$PWD/examples:/work:ro" \
+  aimedia:gpu run -f /work/single-srt.yaml
+```
+
+启动前要先准备与配置 caller/listener 方向匹配的 SRT 发送端和接收端。当前真实数据面
+仍是 experimental：断流保活、输出恢复、广泛互操作和两小时稳定性测试尚未完成。
 
 ## 5. 可选导播示例
 

@@ -23,6 +23,8 @@ use serde_json::json;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
+mod native;
+
 #[derive(Debug, Parser)]
 #[command(name = "aimedia", version, about = "Service-native live media runtime")]
 struct Cli {
@@ -414,13 +416,7 @@ async fn command_run(path: &Path, dry_run: bool, mock: bool) -> Result<()> {
              single-input configuration for the v0.2 data plane, or `--mock` for control testing"
         );
     }
-    bail!(
-        "nativeVideoBackendPending: the single-input contract, streaming MPEG-TS, libsrt, and \
-         libxaac frame codec are present, but NVDEC/NVENC frame processing is not implemented in \
-         this build; a GPU feature build also requires a user-supplied Video Codec SDK 13.0; use \
-         `aimedia run --mock` to exercise the program clock and control socket, or `aimedia run \
-         --dry-run` to validate the graph"
-    )
+    native::run(config).await
 }
 
 async fn command_control(socket: &Path, action: ControlAction) -> Result<()> {

@@ -14,8 +14,8 @@ Repository: https://github.com/anvsk/aimedia
 时钟、背压、重连、资源状态，并通过非阻塞 Tap 接入字幕、审核、识别或导播等 AI。
 
 当前是开发预览。类型化图编译器、流式 MPEG-TS、SRT/libxaac adapter、独立节目时钟、
-有界 fake runtime 和实验性 NVDEC 帧解码已可运行；NVENC 和真实单路 SRT 数据面仍在
-开发，不会标记为 supported。
+有界 runtime 和 NVDEC/NVENC 单路 SRT 数据面已完成首个真实闭环；断流保活、广泛互
+操作、网络损伤和两小时稳定性仍未完成，因此只标记为 experimental。
 
 欢迎 Rust、实时音视频、GPU 和 AI 工程方向的开发者参与，尤其需要 NVIDIA Video
 Codec、SRT/RTMP/RTSP 互操作、故障注入和长时间稳定性验证方面的贡献。
@@ -32,9 +32,9 @@ bounded execution plan. The runtime owns program clocks, backpressure, reconnect
 state, and non-blocking AI taps.
 
 This is an honest development preview. The typed graph compiler, streaming MPEG-TS, SRT/libxaac
-adapters, independent program clocks, bounded fake runtime, and experimental frame-level NVDEC
-are runnable. NVENC and the real single-SRT data plane are still pending and are not advertised
-as supported.
+adapters, independent program clocks, bounded runtime, and the NVDEC/NVENC single-SRT data plane
+have completed a first real end-to-end run. Disconnect keepalive, broader interoperability,
+network impairment, and a two-hour soak are still pending, so the data plane remains experimental.
 
 Contributions around Rust media systems, NVIDIA Video Codec, SRT/RTMP/RTSP interoperability,
 failure injection, and soak testing are welcome.
