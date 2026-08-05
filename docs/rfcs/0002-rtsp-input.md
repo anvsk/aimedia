@@ -58,7 +58,8 @@ H.264 + AAC/G.711 会在 V3-02 形成真实单路闭环。H.265 在本阶段完�
   keepalive 和尽力 `TEARDOWN`。
 - 只接受 `rtsp://`。RTSP over TLS、HTTP tunnel、multicast、RTSP 2.0 和 SRTP 暂不支持。
 - Basic 与 Digest 鉴权；用户名可写配置，密码只能使用环境变量或挂载文件引用。
-- 默认 RTP over RTSP/TCP interleaved；UDP unicast 在真实摄像机和网络损伤测试完成前为
+- 默认 RTP over RTSP/TCP interleaved；当前 native runtime 明确拒绝 UDP。UDP unicast
+  只有在有界重排实现、真实摄像机和网络损伤测试完成后才能升级为
   `experimental`。
 - 每个端点只选择一个视频流和最多一个音频流；多 profile/多码流选择在 SDP 阶段按
   MediaJob 约束完成，不在运行中猜测。
@@ -82,6 +83,28 @@ H.264 + AAC/G.711 会在 V3-02 形成真实单路闭环。H.265 在本阶段完�
   上限时丢弃当前单元并等待下一个恢复边界。
 - H.264/H.265 在重新连接、SSRC 改变、sequence 跳变或参数集变化后等待下一张可独立
   解码的画面；绝不把新旧会话字节拼成一个 access unit。
+
+### V3-02D 实现证据与 UDP 决策
+
+TCP 会话恢复由 `crates/rtsp` 内部完成：读超时、对端断流或可重试的会话错误
+会把连接状态置为 false，按 MediaJob 配置做有上限的指数退避。新会话必须重新完成
+`DESCRIBE/SETUP/PLAY` 并与初始音视频规格兼容；否则返回稳定的
+`mediaProfileChanged` 错误。重连期间不建立媒体队列，节目时钟继续走最后健康画面和
+静音路径。
+
+固定的 Retina 0.4.19 尚无 UDP 重排缓冲，并且在它生成公开
+`PacketItem` 之前就会丢弃乱序包，因此 aimedia 无法在 adapter 外层恢复这些包。截至
+2026-08-06，该行为在 Retina main 中也仍然存在。证据见其
+[`Transport::Udp` 文档](https://github.com/scottlamb/retina/blob/v0.4.19/src/client/mod.rs#L1052-L1067)
+和
+[`RtpHandler` 乱序分支](https://github.com/scottlamb/retina/blob/v0.4.19/src/client/rtp.rs#L77-L83)；
+[当前 main 文档](https://github.com/scottlamb/retina/blob/main/src/client/mod.rs#L1052-L1067)
+作为实时复核入口。
+
+所以 V3-02D2 的完成条件不是“Retina UDP 开关能收包”，而是乱序包在 sequence/loss
+判定和 depacketize 之前进入固定容量、固定等待时间的重排窗口。实现时优先向上游提交小而
+可审查的补丁；在它进入可固定版本之前，aimedia 只能使用明确记录 commit 和差异的临时
+fork，不复制整个 RTSP 实现，也不降级验收标准。
 
 ## MediaJob 契约
 
@@ -145,6 +168,7 @@ payload 损坏必须使用稳定阶段码。可恢复的网络/会话错误只�
 1. 契约、依赖审查、MediaJob schema 和 fixture 语料。
 2. `crates/rtsp` adapter：会话、鉴权、SDP 与类型化媒体事件。
 3. TCP interleaved H.264/AAC/G.711 单路运行时闭环。
-4. UDP RTP/RTCP、重排和超时恢复。
-5. H.265 depacketizer 边界与 V3-04 handoff。
-6. 外部设备、网络损伤、两小时 soak 和支持矩阵升级。
+4. TCP 超时/断流重连、规格一致性和独立 discontinuity。
+5. UDP RTP/RTCP、有界重排和网络损伤恢复。
+6. H.265 depacketizer 边界与 V3-04 handoff。
+7. 外部设备、网络损伤、两小时 soak 和支持矩阵升级。
