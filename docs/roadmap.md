@@ -115,7 +115,9 @@
   [GitHub prerelease](https://github.com/anvsk/aimedia/releases/tag/v0.2-native-live-pipe)；
   Release 附件包含两小时 summary 与逐 30 秒采样，GitHub 记录的 SHA-256 与报告一致。
 - [ ] **V2-11 社区发布**：发布 Hacker News 与一个最相关 Reddit 社区，清楚列出支持与
-  pending；记录链接、反馈主题和路线图调整，不通过灌水获取社区权限。
+  pending；记录链接、反馈主题和路线图调整，不通过灌水获取社区权限。2026-08-05
+  首轮结果见[社区发布记录](community-feedback.md)：r/rust 已生成帖子但未进入 `/new`，
+  Hacker News 在创建 story 前触发 Show HN 新用户限制；当前无真实反馈，因此保持未完成。
 
 只有 V2-01 至 V2-11 全部完成，v0.2 才能标记完成。
 
