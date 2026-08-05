@@ -1,0 +1,48 @@
+apiVersion: aimedia/v1alpha2
+kind: MediaJob
+metadata:
+  name: rtsp-camera-demo
+
+inputs:
+  - name: camera
+    role: custom
+    uri: rtsp://192.0.2.10/Streaming/Channels/101
+    rtsp:
+      transport: tcp
+      username: admin
+      passwordRef:
+        env: AIMEDIA_CAMERA_PASSWORD
+      connectTimeoutMs: 3000
+      readTimeoutMs: 5000
+      keepaliveMs: 15000
+      reconnect:
+        enabled: true
+        initialBackoffMs: 250
+        maxBackoffMs: 5000
+
+processing:
+  video:
+    width: 1920
+    height: 1080
+    fps: 30
+    bitrateKbps: 6000
+    gopMs: 1000
+    profile: main
+    bFrames: 0
+  audio:
+    sampleRate: 48000
+    channels: 2
+    bitrateKbps: 128
+  timing:
+    masterInput: 0
+    bufferMs: 1000
+    maxSkewMs: 80
+
+outputs:
+  - name: program
+    uri: srt://127.0.0.1:10000
+    srt:
+      mode: caller
+      latencyMs: 120
+
+taps: []

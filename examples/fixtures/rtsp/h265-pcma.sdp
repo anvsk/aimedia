@@ -1,0 +1,14 @@
+v=0
+o=- 3912345679 3912345679 IN IP4 192.0.2.11
+s=H265 G711 camera
+t=0 0
+a=control:*
+m=video 0 RTP/AVP 98
+c=IN IP4 0.0.0.0
+a=rtpmap:98 H265/90000
+a=fmtp:98 sprop-vps=QAEMAf//AWAAAAMAkAAAAwAAAwBdoAKAgC0WWVmkkyA=;sprop-sps=QgEBAWAAAAMAkAAAAwAAAwBdoAKAgC0WNrkkkyT5AQAAAwABAAADADwQ;sprop-pps=RAHBcrRiQA==
+a=control:trackID=1
+m=audio 0 RTP/AVP 8
+c=IN IP4 0.0.0.0
+a=rtpmap:8 PCMA/8000/1
+a=control:trackID=2
