@@ -12,11 +12,17 @@ use aimedia_core::{
     CameraSnapshot, ControlCommand, ControlErrorCode, ControlRequest, ControlResponse, Director,
     FastSignals, GpuSurfaceRuntimeStats, InputCodecRuntimeStats, InputRuntimeState,
     OutputRuntimeState, PipelineConfig, PipelineMode, PipelineRuntimeState, QueueRuntimeState,
-    SrtRuntimeStats, SwitchReason, backend::CodecId, config::parse_socket_mode,
+    SrtRuntimeStats, SwitchReason, backend::CodecId,
 };
 pub use aimedia_graph::QueueCapacities;
+use aimedia_graph::{
+    CompileError, ExecutionPlan, FullPolicy, JobMode, PLAN_API_VERSION, compile as compile_plan,
+};
 use thiserror::Error;
 use tokio::sync::Mutex;
+
+#[cfg(unix)]
+use aimedia_core::config::parse_socket_mode;
 
 #[cfg(unix)]
 use tokio::{
@@ -38,6 +44,35 @@ pub enum RuntimeError {
     UnsafeSocketPath(PathBuf),
     #[error("control server task failed: {0}")]
     Join(String),
+    #[error("execution plan failed preflight: {0}")]
+    Plan(#[from] RuntimePlanError),
+}
+
+#[derive(Debug, Error)]
+pub enum RuntimePlanError {
+    #[error("media job could not be compiled: {0}")]
+    Compile(#[from] CompileError),
+    #[error("execution plan {field} mismatch: expected {expected:?}, got {actual:?}")]
+    Identity {
+        field: &'static str,
+        expected: String,
+        actual: String,
+    },
+    #[error("execution plan is missing required edge {from:?} -> {to:?}")]
+    MissingEdge { from: String, to: String },
+    #[error(
+        "execution edge {from:?} -> {to:?} uses {actual:?}; the current executor requires {expected:?}"
+    )]
+    QueuePolicy {
+        from: String,
+        to: String,
+        expected: FullPolicy,
+        actual: FullPolicy,
+    },
+    #[error("execution edge {from:?} -> {to:?} has zero queue capacity")]
+    ZeroCapacity { from: String, to: String },
+    #[error("execution plan invariant failed: {0}")]
+    Invariant(String),
 }
 
 /// Independent output clock. Video uses a rational accumulator; audio uses exact sample counts.
@@ -130,7 +165,12 @@ struct Controller {
 }
 
 impl Controller {
-    fn new(config: &PipelineConfig, healthy: bool) -> Self {
+    fn new(
+        config: &PipelineConfig,
+        plan: &ExecutionPlan,
+        healthy: bool,
+    ) -> Result<Self, RuntimePlanError> {
+        validate_runtime_plan(config, plan)?;
         let input_count = config.inputs.len();
         let cameras = std::array::from_fn(|index| CameraSnapshot {
             name: config.inputs.get(index).map_or_else(
@@ -168,20 +208,8 @@ impl Controller {
             codec: InputCodecRuntimeStats::default(),
             gpu: GpuSurfaceRuntimeStats::default(),
         });
-        let capacities = QueueCapacities::from_config(config);
-        let mut queues = Vec::with_capacity(input_count * 5 + 1);
-        for index in 0..input_count {
-            let name = &config.inputs[index].name;
-            queues.extend([
-                queue_state(format!("{name}.transport"), capacities.transport_messages),
-                queue_state(format!("{name}.videoDecode"), capacities.video_frames),
-                queue_state(format!("{name}.audioDecode"), capacities.audio_blocks),
-                queue_state(format!("{name}.videoTimeline"), capacities.video_frames),
-                queue_state(format!("{name}.audioTimeline"), capacities.audio_blocks),
-            ]);
-        }
-        queues.push(queue_state("program.output", capacities.encoded_messages));
-        Self {
+        let queues = controller_queue_states(config, plan)?;
+        Ok(Self {
             pipeline: config.metadata.name.clone(),
             started: Instant::now(),
             running: true,
@@ -197,7 +225,7 @@ impl Controller {
             output_state: OutputRuntimeState::default(),
             queues,
             last_reason: SwitchReason::Initial,
-        }
+        })
     }
 
     fn elapsed_ms(&self) -> u64 {
@@ -423,17 +451,197 @@ fn queue_state(name: impl Into<String>, capacity: usize) -> QueueRuntimeState {
     }
 }
 
+pub(crate) fn validate_runtime_plan(
+    config: &PipelineConfig,
+    plan: &ExecutionPlan,
+) -> Result<(), RuntimePlanError> {
+    if plan.api_version != PLAN_API_VERSION {
+        return Err(RuntimePlanError::Identity {
+            field: "apiVersion",
+            expected: PLAN_API_VERSION.to_owned(),
+            actual: plan.api_version.clone(),
+        });
+    }
+    if plan.job != config.metadata.name {
+        return Err(RuntimePlanError::Identity {
+            field: "job",
+            expected: config.metadata.name.clone(),
+            actual: plan.job.clone(),
+        });
+    }
+    let expected_mode = if config.inputs.len() == 1 {
+        JobMode::Single
+    } else {
+        JobMode::Switching
+    };
+    if plan.mode != expected_mode {
+        return Err(RuntimePlanError::Identity {
+            field: "mode",
+            expected: format!("{expected_mode:?}"),
+            actual: format!("{:?}", plan.mode),
+        });
+    }
+    if plan.declared_buffer_ms != config.sync.buffer_ms {
+        return Err(RuntimePlanError::Identity {
+            field: "declaredBufferMs",
+            expected: config.sync.buffer_ms.to_string(),
+            actual: plan.declared_buffer_ms.to_string(),
+        });
+    }
+    if plan.resources.gpu_decode_sessions != config.inputs.len() {
+        return Err(RuntimePlanError::Invariant(format!(
+            "expected {} GPU decode session(s), got {}",
+            config.inputs.len(),
+            plan.resources.gpu_decode_sessions
+        )));
+    }
+    if plan.resources.gpu_encode_sessions != 1 {
+        return Err(RuntimePlanError::Invariant(format!(
+            "expected one GPU encode session, got {}",
+            plan.resources.gpu_encode_sessions
+        )));
+    }
+    if !plan.resources.independent_program_clock {
+        return Err(RuntimePlanError::Invariant(
+            "the executor requires an independent program clock".to_owned(),
+        ));
+    }
+    if !plan.resources.all_queues_bounded {
+        return Err(RuntimePlanError::Invariant(
+            "the executor refuses plans with unbounded queues".to_owned(),
+        ));
+    }
+    if plan.resources.ai_on_hot_path {
+        return Err(RuntimePlanError::Invariant(
+            "AI cannot be placed on the media hot path".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+pub(crate) fn plan_queue_capacity(
+    plan: &ExecutionPlan,
+    from: &str,
+    to: &str,
+    expected_policy: FullPolicy,
+) -> Result<usize, RuntimePlanError> {
+    let queue = plan
+        .queue(from, to)
+        .ok_or_else(|| RuntimePlanError::MissingEdge {
+            from: from.to_owned(),
+            to: to.to_owned(),
+        })?;
+    if queue.capacity == 0 {
+        return Err(RuntimePlanError::ZeroCapacity {
+            from: from.to_owned(),
+            to: to.to_owned(),
+        });
+    }
+    if queue.full_policy != expected_policy {
+        return Err(RuntimePlanError::QueuePolicy {
+            from: from.to_owned(),
+            to: to.to_owned(),
+            expected: expected_policy,
+            actual: queue.full_policy,
+        });
+    }
+    Ok(queue.capacity)
+}
+
+fn controller_queue_states(
+    config: &PipelineConfig,
+    plan: &ExecutionPlan,
+) -> Result<Vec<QueueRuntimeState>, RuntimePlanError> {
+    let mut queues = Vec::with_capacity(config.inputs.len() * 5 + 1);
+    for (index, input) in config.inputs.iter().enumerate() {
+        queues.extend([
+            queue_state(
+                format!("{}.transport", input.name),
+                plan_queue_capacity(
+                    plan,
+                    &format!("input.{index}"),
+                    &format!("demux.{index}"),
+                    FullPolicy::Backpressure,
+                )?,
+            ),
+            queue_state(
+                format!("{}.videoDecode", input.name),
+                plan_queue_capacity(
+                    plan,
+                    &format!("demux.{index}"),
+                    &format!("video.decode.{index}"),
+                    FullPolicy::Backpressure,
+                )?,
+            ),
+            queue_state(
+                format!("{}.audioDecode", input.name),
+                plan_queue_capacity(
+                    plan,
+                    &format!("demux.{index}"),
+                    &format!("audio.decode.{index}"),
+                    FullPolicy::Backpressure,
+                )?,
+            ),
+            queue_state(
+                format!("{}.videoTimeline", input.name),
+                plan_queue_capacity(
+                    plan,
+                    &format!("video.decode.{index}"),
+                    "video.timeline",
+                    FullPolicy::Backpressure,
+                )?,
+            ),
+            queue_state(
+                format!("{}.audioTimeline", input.name),
+                plan_queue_capacity(
+                    plan,
+                    &format!("audio.decode.{index}"),
+                    "audio.timeline",
+                    FullPolicy::Backpressure,
+                )?,
+            ),
+        ]);
+    }
+    let video_output = plan_queue_capacity(
+        plan,
+        "video.encode",
+        "mux.program",
+        FullPolicy::Backpressure,
+    )?;
+    let audio_output = plan_queue_capacity(
+        plan,
+        "audio.encode",
+        "mux.program",
+        FullPolicy::Backpressure,
+    )?;
+    if video_output != audio_output {
+        return Err(RuntimePlanError::Invariant(format!(
+            "the shared encoded queue requires equal video/audio capacities, got {video_output} and {audio_output}"
+        )));
+    }
+    queues.push(queue_state("program.output", video_output));
+    Ok(queues)
+}
+
 #[derive(Debug, Clone)]
 pub struct ControllerHandle {
     inner: Arc<Mutex<Controller>>,
 }
 
 impl ControllerHandle {
-    #[must_use]
-    pub fn new(config: &PipelineConfig, inputs_healthy: bool) -> Self {
-        Self {
-            inner: Arc::new(Mutex::new(Controller::new(config, inputs_healthy))),
-        }
+    pub fn new(config: &PipelineConfig, inputs_healthy: bool) -> Result<Self, RuntimePlanError> {
+        let plan = compile_plan(config)?;
+        Self::from_plan(config, &plan, inputs_healthy)
+    }
+
+    pub fn from_plan(
+        config: &PipelineConfig,
+        plan: &ExecutionPlan,
+        inputs_healthy: bool,
+    ) -> Result<Self, RuntimePlanError> {
+        Ok(Self {
+            inner: Arc::new(Mutex::new(Controller::new(config, plan, inputs_healthy)?)),
+        })
     }
 
     pub async fn process(&self, request: ControlRequest) -> ControlResponse {
@@ -479,6 +687,7 @@ impl ControllerHandle {
 
 #[derive(Debug)]
 pub struct ControlServer {
+    #[cfg_attr(not(unix), allow(dead_code))]
     socket_path: PathBuf,
     task: tokio::task::JoinHandle<Result<(), RuntimeError>>,
 }
@@ -668,7 +877,7 @@ pub async fn send_control_request(
 }
 
 pub async fn run_mock_pipeline(config: PipelineConfig) -> Result<(), RuntimeError> {
-    let controller = ControllerHandle::new(&config, true);
+    let controller = ControllerHandle::new(&config, true)?;
     let server = ControlServer::start(
         &config.control.socket_path,
         &config.control.socket_mode,
@@ -692,11 +901,12 @@ pub async fn run_mock_pipeline(config: PipelineConfig) -> Result<(), RuntimeErro
 #[cfg(test)]
 mod tests {
     use aimedia_core::{ControlErrorCode, ControlRequest, PipelineConfig, PipelineMode};
+    use aimedia_graph::compile as compile_plan;
 
-    use super::{
-        ControlServer, ControllerHandle, DriftCorrector, ProgramClock, QueueCapacities,
-        send_control_request,
-    };
+    use super::{ControllerHandle, DriftCorrector, ProgramClock, RuntimePlanError};
+
+    #[cfg(unix)]
+    use super::{ControlServer, send_control_request};
 
     fn config() -> PipelineConfig {
         PipelineConfig::from_yaml(include_str!("../../../examples/director.yaml"))
@@ -726,7 +936,7 @@ mod tests {
     #[tokio::test]
     async fn rejects_take_to_unavailable_camera_before_switching() {
         let config = config();
-        let controller = ControllerHandle::new(&config, false);
+        let controller = ControllerHandle::new(&config, false).expect("plan is executable");
         let response = controller
             .process(ControlRequest::take("req", "close", 5_000))
             .await;
@@ -741,7 +951,7 @@ mod tests {
     #[tokio::test]
     async fn zero_hold_stays_manual_until_auto_is_requested() {
         let config = config();
-        let controller = ControllerHandle::new(&config, true);
+        let controller = ControllerHandle::new(&config, true).expect("plan is executable");
         controller.tick().await;
         let taken = controller
             .process(ControlRequest::take("take", "close", 0))
@@ -766,7 +976,7 @@ mod tests {
     #[tokio::test]
     async fn single_input_reports_mode_and_rejects_director_commands() {
         let config = single_config();
-        let controller = ControllerHandle::new(&config, true);
+        let controller = ControllerHandle::new(&config, true).expect("plan is executable");
 
         let state = controller
             .process(ControlRequest::state("state"))
@@ -799,12 +1009,36 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn controller_queue_state_comes_from_the_compiled_plan() {
+        let config = single_config();
+        let plan = compile_plan(&config).expect("plan compiles");
+        let expected_transport = plan
+            .queue("input.0", "demux.0")
+            .expect("transport edge exists")
+            .capacity;
+        let controller =
+            ControllerHandle::from_plan(&config, &plan, true).expect("plan is executable");
+        let state = controller.state().await;
+        let transport = state
+            .queues
+            .iter()
+            .find(|queue| queue.name == "program.transport")
+            .expect("transport queue is reported");
+        assert_eq!(transport.capacity, expected_transport);
+    }
+
     #[test]
-    fn capacities_are_bounded_and_derived_from_media_rate() {
-        let capacities = QueueCapacities::from_config(&config());
-        assert_eq!(capacities.video_frames, 32);
-        assert!(capacities.audio_blocks > capacities.video_frames);
-        assert!(capacities.encoded_messages <= 2_048);
+    fn controller_rejects_a_plan_with_a_missing_runtime_edge() {
+        let config = single_config();
+        let mut plan = compile_plan(&config).expect("plan compiles");
+        plan.edges
+            .retain(|edge| edge.from != "input.0" || edge.to != "demux.0");
+        assert!(matches!(
+            ControllerHandle::from_plan(&config, &plan, true),
+            Err(RuntimePlanError::MissingEdge { from, to })
+                if from == "input.0" && to == "demux.0"
+        ));
     }
 
     #[cfg(unix)]
@@ -816,7 +1050,7 @@ mod tests {
         };
 
         let config = config();
-        let controller = ControllerHandle::new(&config, true);
+        let controller = ControllerHandle::new(&config, true).expect("plan is executable");
         let socket =
             std::env::temp_dir().join(format!("aimedia-control-{}.sock", std::process::id()));
         let server = ControlServer::start(&socket, "0600", controller)

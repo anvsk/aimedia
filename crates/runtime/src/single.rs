@@ -15,6 +15,7 @@ use aimedia_core::{
         VideoDecoder, VideoEncoder, VideoFrame,
     },
 };
+use aimedia_graph::{ExecutionPlan, FullPolicy, JobMode, compile as compile_plan};
 use aimedia_mpegts::{DemuxEvent, MuxPacket, MuxStream, StreamDemuxer, StreamMuxer, TsError};
 use thiserror::Error;
 use tokio::{
@@ -22,7 +23,9 @@ use tokio::{
     task::JoinSet,
 };
 
-use crate::{ControllerHandle, ProgramClock, QueueCapacities};
+use crate::{
+    ControllerHandle, ProgramClock, RuntimePlanError, plan_queue_capacity, validate_runtime_plan,
+};
 
 #[derive(Debug, Error)]
 pub enum SinglePipelineError {
@@ -40,6 +43,73 @@ pub enum SinglePipelineError {
     EncodedCodec(CodecId),
     #[error("audio frame has invalid sample layout")]
     InvalidAudioFrame,
+    #[error("execution plan failed preflight: {0}")]
+    Plan(#[from] RuntimePlanError),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SingleQueuePlan {
+    transport_messages: usize,
+    video_packets: usize,
+    audio_packets: usize,
+    video_frames: usize,
+    audio_frames: usize,
+    encoded_messages: usize,
+}
+
+impl SingleQueuePlan {
+    fn from_plan(plan: &ExecutionPlan) -> Result<Self, RuntimePlanError> {
+        let video_output = plan_queue_capacity(
+            plan,
+            "video.encode",
+            "mux.program",
+            FullPolicy::Backpressure,
+        )?;
+        let audio_output = plan_queue_capacity(
+            plan,
+            "audio.encode",
+            "mux.program",
+            FullPolicy::Backpressure,
+        )?;
+        if video_output != audio_output {
+            return Err(RuntimePlanError::Invariant(format!(
+                "the shared encoded queue requires equal video/audio capacities, got {video_output} and {audio_output}"
+            )));
+        }
+        Ok(Self {
+            transport_messages: plan_queue_capacity(
+                plan,
+                "input.0",
+                "demux.0",
+                FullPolicy::Backpressure,
+            )?,
+            video_packets: plan_queue_capacity(
+                plan,
+                "demux.0",
+                "video.decode.0",
+                FullPolicy::Backpressure,
+            )?,
+            audio_packets: plan_queue_capacity(
+                plan,
+                "demux.0",
+                "audio.decode.0",
+                FullPolicy::Backpressure,
+            )?,
+            video_frames: plan_queue_capacity(
+                plan,
+                "video.decode.0",
+                "video.timeline",
+                FullPolicy::Backpressure,
+            )?,
+            audio_frames: plan_queue_capacity(
+                plan,
+                "audio.decode.0",
+                "audio.timeline",
+                FullPolicy::Backpressure,
+            )?,
+            encoded_messages: video_output,
+        })
+    }
 }
 
 pub struct SinglePipelineBackends {
@@ -60,6 +130,7 @@ impl std::fmt::Debug for SinglePipelineBackends {
 #[derive(Debug)]
 pub struct SinglePipeline {
     config: PipelineConfig,
+    plan: ExecutionPlan,
     controller: ControllerHandle,
     backends: SinglePipelineBackends,
 }
@@ -72,9 +143,20 @@ impl SinglePipeline {
         if config.inputs.len() != 1 {
             return Err(SinglePipelineError::InputCount(config.inputs.len()));
         }
-        let controller = ControllerHandle::new(&config, true);
+        let plan = compile_plan(&config).map_err(RuntimePlanError::from)?;
+        validate_runtime_plan(&config, &plan)?;
+        if plan.mode != JobMode::Single {
+            return Err(RuntimePlanError::Invariant(format!(
+                "single executor received {:?} plan",
+                plan.mode
+            ))
+            .into());
+        }
+        SingleQueuePlan::from_plan(&plan)?;
+        let controller = ControllerHandle::from_plan(&config, &plan, true)?;
         Ok(Self {
             config,
+            plan,
             controller,
             backends,
         })
@@ -85,9 +167,15 @@ impl SinglePipeline {
         self.controller.clone()
     }
 
+    #[must_use]
+    pub const fn plan(&self) -> &ExecutionPlan {
+        &self.plan
+    }
+
     pub async fn run(self) -> Result<PipelineRuntimeState, SinglePipelineError> {
         let Self {
             config,
+            plan,
             controller,
             backends,
         } = self;
@@ -99,19 +187,19 @@ impl SinglePipeline {
             audio_decoder,
             audio_encoder,
         } = backends;
-        let capacities = QueueCapacities::from_config(&config);
+        let queues = SingleQueuePlan::from_plan(&plan)?;
         let input_name = config.inputs[0].name.clone();
         let clock = Arc::new(Mutex::new(ProgramClock::new(
             u64::from(config.media.video.fps),
             1,
         )));
 
-        let (transport_tx, transport_rx) = mpsc::channel(capacities.transport_messages);
-        let (video_packet_tx, video_packet_rx) = mpsc::channel(capacities.video_frames);
-        let (audio_packet_tx, audio_packet_rx) = mpsc::channel(capacities.audio_blocks);
-        let (video_frame_tx, video_frame_rx) = mpsc::channel(capacities.video_frames);
-        let (audio_frame_tx, audio_frame_rx) = mpsc::channel(capacities.audio_blocks);
-        let (encoded_tx, encoded_rx) = mpsc::channel(capacities.encoded_messages);
+        let (transport_tx, transport_rx) = mpsc::channel(queues.transport_messages);
+        let (video_packet_tx, video_packet_rx) = mpsc::channel(queues.video_packets);
+        let (audio_packet_tx, audio_packet_rx) = mpsc::channel(queues.audio_packets);
+        let (video_frame_tx, video_frame_rx) = mpsc::channel(queues.video_frames);
+        let (audio_frame_tx, audio_frame_rx) = mpsc::channel(queues.audio_frames);
+        let (encoded_tx, encoded_rx) = mpsc::channel(queues.encoded_messages);
         let request_idr = Arc::new(AtomicBool::new(true));
         let mut tasks = JoinSet::new();
 
@@ -736,6 +824,14 @@ mod tests {
             },
         )
         .expect("pipeline builds");
+        assert_eq!(
+            pipeline
+                .plan()
+                .queue("input.0", "demux.0")
+                .expect("transport edge")
+                .capacity,
+            256
+        );
 
         let state = pipeline.run().await.expect("pipeline completes");
         assert!(!state.running);

@@ -7,6 +7,8 @@ use aimedia_core::{PipelineConfig, config::VlmMode};
 use serde::Serialize;
 use thiserror::Error;
 
+pub const PLAN_API_VERSION: &str = "aimedia.plan/v1alpha1";
+
 #[derive(Debug, Error)]
 pub enum CompileError {
     #[error("media job configuration is invalid: {0}")]
@@ -149,6 +151,18 @@ impl ExecutionPlan {
         self.nodes
             .iter()
             .filter(|node| node.status == NodeStatus::Pending)
+    }
+
+    #[must_use]
+    pub fn edge(&self, from: &str, to: &str) -> Option<&ExecutionEdge> {
+        self.edges
+            .iter()
+            .find(|edge| edge.from == from && edge.to == to)
+    }
+
+    #[must_use]
+    pub fn queue(&self, from: &str, to: &str) -> Option<QueueContract> {
+        self.edge(from, to).map(|edge| edge.queue)
     }
 }
 
@@ -484,7 +498,7 @@ pub fn compile(config: &PipelineConfig) -> Result<ExecutionPlan, CompileError> {
     ]);
 
     Ok(ExecutionPlan {
-        api_version: "aimedia.plan/v1alpha1".to_owned(),
+        api_version: PLAN_API_VERSION.to_owned(),
         job: config.metadata.name.clone(),
         mode,
         declared_buffer_ms: config.sync.buffer_ms,
@@ -572,6 +586,13 @@ mod tests {
         assert!(!plan.resources.ai_on_hot_path);
         assert!(plan.edges.iter().all(|edge| edge.queue.capacity > 0));
         assert!(plan.nodes.iter().any(|node| node.id == "video.timeline"));
+        assert_eq!(
+            plan.queue("input.0", "demux.0"),
+            Some(QueueContract {
+                capacity: 256,
+                full_policy: FullPolicy::Backpressure,
+            })
+        );
     }
 
     #[test]
