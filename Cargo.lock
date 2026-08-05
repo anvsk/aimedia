@@ -20,6 +20,7 @@ dependencies = [
  "aimedia-graph",
  "aimedia-mpegts",
  "aimedia-nvidia",
+ "aimedia-rtsp",
  "aimedia-runtime",
  "aimedia-srt",
  "anyhow",
@@ -100,6 +101,7 @@ name = "aimedia-rtsp"
 version = "0.2.0-alpha.1"
 dependencies = [
  "aimedia-core",
+ "async-trait",
  "bytes",
  "futures-util",
  "retina",

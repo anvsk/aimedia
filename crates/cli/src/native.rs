@@ -1,9 +1,14 @@
 use aimedia_aac::Libxaac;
-use aimedia_core::PipelineConfig;
+use aimedia_core::{
+    PipelineConfig,
+    backend::{AudioDecoder, PacketSource},
+    config::RtspTransport,
+};
 use aimedia_nvidia::{NvdecConfig, NvdecDecoder, NvencConfig, NvencEncoder};
+use aimedia_rtsp::{G711Decoder, RtspCodec, RtspEndpoint, RtspMediaProfile, RtspPacketSource};
 use aimedia_runtime::{
     ControlServer,
-    single::{SinglePipeline, SinglePipelineBackends},
+    single::{SingleInput, SinglePipeline, SinglePipelineBackends},
 };
 use aimedia_srt::{Endpoint, SrtTransport};
 use anyhow::{Context, Result, anyhow, bail};
@@ -67,9 +72,6 @@ async fn build_backends(config: &PipelineConfig) -> Result<SinglePipelineBackend
         .context("configured audio profile is not supported by the native AAC backend")?;
 
     let aac = Libxaac::load().context("could not initialize the native AAC backend")?;
-    let audio_decoder = aac
-        .audio_decoder()
-        .context("could not create the native AAC decoder")?;
     let audio_encoder = aac
         .audio_encoder()
         .context("could not create the native AAC encoder")?;
@@ -101,8 +103,6 @@ async fn build_backends(config: &PipelineConfig) -> Result<SinglePipelineBackend
     })
     .context("could not initialize the NVENC H.264 encoder")?;
 
-    let input_endpoint = Endpoint::from_config(&input.uri, &input.srt, input.secret_ref.as_ref())
-        .context("could not prepare the SRT input")?;
     let output_endpoint = Endpoint::from_config(
         &config.output.uri,
         &config.output.srt,
@@ -110,20 +110,115 @@ async fn build_backends(config: &PipelineConfig) -> Result<SinglePipelineBackend
     )
     .context("could not prepare the SRT output")?;
 
-    let (input_transport, output_transport) = tokio::try_join!(
-        SrtTransport::connect(input_endpoint),
-        SrtTransport::connect(output_endpoint),
-    )
-    .context("could not establish the initial SRT input and output connections")?;
+    let (input, audio_decoder): (SingleInput, Box<dyn AudioDecoder>) = if input
+        .uri
+        .get(..7)
+        .is_some_and(|scheme| scheme.eq_ignore_ascii_case("rtsp://"))
+    {
+        let rtsp = input
+            .rtsp
+            .as_ref()
+            .ok_or_else(|| anyhow!("rtspConfigRequired: RTSP input requires inputs[0].rtsp"))?;
+        if rtsp.transport != RtspTransport::Tcp {
+            bail!(
+                "rtspUdpPendingV3_02D: the native runtime currently supports RTSP interleaved TCP only"
+            );
+        }
+        let endpoint = RtspEndpoint::from_config(&input.uri, rtsp)
+            .context("could not prepare the RTSP input")?;
+        let mut source = RtspPacketSource::connect(endpoint)
+            .await
+            .context("could not establish the RTSP DESCRIBE/SETUP/PLAY session")?;
+        if source.profile().video.codec != Some(RtspCodec::H264) {
+            let _ = source.close().await;
+            bail!(
+                "rtspVideoUnsupported: v0.3 requires an H.264 video track; H.265 decode integration is scheduled for V3-04"
+            );
+        }
+        let decoder = match build_rtsp_audio_decoder(
+            &aac,
+            source.profile(),
+            audio.sample_rate,
+            audio.channels,
+        ) {
+            Ok(decoder) => decoder,
+            Err(error) => {
+                let _ = source.close().await;
+                return Err(error);
+            }
+        };
+        (SingleInput::Packets(Box::new(source)), decoder)
+    } else {
+        let input_endpoint =
+            Endpoint::from_config(&input.uri, &input.srt, input.secret_ref.as_ref())
+                .context("could not prepare the SRT input")?;
+        let input_transport = SrtTransport::connect(input_endpoint)
+            .await
+            .context("could not establish the initial SRT input connection")?;
+        (
+            SingleInput::Transport(Box::new(input_transport)),
+            Box::new(
+                aac.audio_decoder()
+                    .context("could not create the native AAC decoder")?,
+            ),
+        )
+    };
+
+    let output_transport = SrtTransport::connect(output_endpoint)
+        .await
+        .context("could not establish the initial SRT output connection")?;
 
     Ok(SinglePipelineBackends {
-        input: Box::new(input_transport),
+        input,
         output: Box::new(output_transport),
         video_decoder: Box::new(video_decoder),
         video_encoder: Box::new(video_encoder),
-        audio_decoder: Box::new(audio_decoder),
+        audio_decoder,
         audio_encoder: Box::new(audio_encoder),
     })
+}
+
+fn build_rtsp_audio_decoder(
+    aac: &std::sync::Arc<Libxaac>,
+    profile: &RtspMediaProfile,
+    output_sample_rate: u32,
+    output_channels: u8,
+) -> Result<Box<dyn AudioDecoder>> {
+    match profile.audio.as_ref() {
+        Some(track) if track.codec == Some(RtspCodec::AacLc) => {
+            if track.clock_rate != 48_000 || track.channels != Some(2) {
+                bail!(
+                    "rtspAacProfileUnsupported: v0.3 requires RTSP AAC-LC at 48000 Hz stereo; general normalization is scheduled for V3-05"
+                );
+            }
+            Ok(Box::new(
+                aac.audio_decoder()
+                    .context("could not create the native AAC decoder")?,
+            ))
+        }
+        Some(track)
+            if matches!(
+                track.codec,
+                Some(RtspCodec::G711Alaw | RtspCodec::G711Mulaw)
+            ) =>
+        {
+            Ok(Box::new(
+                G711Decoder::new(
+                    track.codec.expect("match guarantees a codec"),
+                    output_sample_rate,
+                    output_channels,
+                )
+                .context("could not create the G.711 audio bridge")?,
+            ))
+        }
+        Some(track) => bail!(
+            "rtspAudioUnsupported: selected audio track {:?} is not AAC-LC, PCMA, or PCMU",
+            track.codec
+        ),
+        None => Ok(Box::new(aac.audio_decoder().context(
+            "could not create the native AAC decoder for the silent program path",
+        )?)),
+    }
 }
 
 const fn align_up(value: u32, alignment: u32) -> u32 {

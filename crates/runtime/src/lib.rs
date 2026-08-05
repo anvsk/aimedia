@@ -12,7 +12,7 @@ use aimedia_core::{
     CameraSnapshot, ControlCommand, ControlErrorCode, ControlRequest, ControlResponse, Director,
     FastSignals, GpuSurfaceRuntimeStats, InputCodecRuntimeStats, InputRuntimeState,
     LatencyRuntimeStats, OutputRuntimeState, PipelineConfig, PipelineMode, PipelineRuntimeState,
-    QueueRuntimeState, SrtRuntimeStats, SwitchReason, backend::CodecId,
+    QueueRuntimeState, RtspRuntimeStats, SrtRuntimeStats, SwitchReason, backend::CodecId,
 };
 pub use aimedia_graph::QueueCapacities;
 use aimedia_graph::{
@@ -260,9 +260,27 @@ impl Controller {
             video_timeline_depth: 0,
             audio_timeline_depth: 0,
             srt: SrtRuntimeStats {
-                connected: healthy && index < input_count,
+                connected: healthy
+                    && index < input_count
+                    && config.inputs[index]
+                        .uri
+                        .get(..6)
+                        .is_some_and(|scheme| scheme.eq_ignore_ascii_case("srt://")),
                 ..SrtRuntimeStats::default()
             },
+            rtsp: (index < input_count
+                && config.inputs[index]
+                    .uri
+                    .get(..7)
+                    .is_some_and(|scheme| scheme.eq_ignore_ascii_case("rtsp://")))
+            .then(|| RtspRuntimeStats {
+                connected: healthy,
+                transport: config.inputs[index].rtsp.as_ref().map_or_else(
+                    || "unknown".to_owned(),
+                    |rtsp| format!("{:?}", rtsp.transport).to_ascii_lowercase(),
+                ),
+                ..RtspRuntimeStats::default()
+            }),
             codec: InputCodecRuntimeStats::default(),
             gpu: GpuSurfaceRuntimeStats::default(),
         });
@@ -452,6 +470,20 @@ impl Controller {
         self.input_states[index].srt = stats;
     }
 
+    fn set_input_rtsp(&mut self, index: usize, stats: RtspRuntimeStats) {
+        if index >= self.input_count {
+            return;
+        }
+        if !stats.connected {
+            self.input_states[index].healthy = false;
+            self.input_states[index].synchronized = false;
+            self.cameras[index].healthy = false;
+            self.cameras[index].synchronized = false;
+            self.cameras[index].fast.transport_health = 0.0;
+        }
+        self.input_states[index].rtsp = Some(stats);
+    }
+
     fn set_output_srt(&mut self, stats: SrtRuntimeStats) {
         self.output_state.srt = stats;
     }
@@ -489,7 +521,7 @@ impl Controller {
                     self.cameras[0].fast.transport_health = 1.0;
                 }
             }
-            CodecId::AacLc => {
+            CodecId::AacLc | CodecId::G711Alaw | CodecId::G711Mulaw => {
                 self.input_states[0].codec.audio_decoded_frames = self.input_states[0]
                     .codec
                     .audio_decoded_frames
@@ -507,7 +539,7 @@ impl Controller {
                     .video_dropped_frames
                     .saturating_add(1);
             }
-            CodecId::AacLc => {
+            CodecId::AacLc | CodecId::G711Alaw | CodecId::G711Mulaw => {
                 self.input_states[0].codec.audio_dropped_frames = self.input_states[0]
                     .codec
                     .audio_dropped_frames
@@ -523,7 +555,7 @@ impl Controller {
                 self.output_state.video_encoded_frames =
                     self.output_state.video_encoded_frames.saturating_add(1);
             }
-            CodecId::AacLc => {
+            CodecId::AacLc | CodecId::G711Alaw | CodecId::G711Mulaw => {
                 self.output_state.audio_encoded_frames =
                     self.output_state.audio_encoded_frames.saturating_add(1);
             }
@@ -537,7 +569,7 @@ impl Controller {
                 self.output_state.video_dropped_frames =
                     self.output_state.video_dropped_frames.saturating_add(1);
             }
-            CodecId::AacLc => {
+            CodecId::AacLc | CodecId::G711Alaw | CodecId::G711Mulaw => {
                 self.output_state.audio_dropped_frames =
                     self.output_state.audio_dropped_frames.saturating_add(1);
             }
@@ -686,10 +718,21 @@ fn controller_queue_states(
     plan: &ExecutionPlan,
 ) -> Result<Vec<QueueRuntimeState>, RuntimePlanError> {
     for index in 0..config.inputs.len() {
+        let source = format!("input.{index}");
+        let demux = format!("demux.{index}");
+        let rtsp = config.inputs[index]
+            .uri
+            .get(..7)
+            .is_some_and(|scheme| scheme.eq_ignore_ascii_case("rtsp://"));
+        let packet_source = if rtsp {
+            source.clone()
+        } else {
+            plan_queue_capacity(plan, &source, &demux, FullPolicy::Backpressure)?;
+            demux
+        };
         for (from, to) in [
-            (format!("input.{index}"), format!("demux.{index}")),
-            (format!("demux.{index}"), format!("video.decode.{index}")),
-            (format!("demux.{index}"), format!("audio.decode.{index}")),
+            (packet_source.clone(), format!("video.decode.{index}")),
+            (packet_source, format!("audio.decode.{index}")),
             (format!("audio.decode.{index}"), "audio.timeline".to_owned()),
         ] {
             plan_queue_capacity(plan, &from, &to, FullPolicy::Backpressure)?;
@@ -776,8 +819,12 @@ fn physical_queue_name(config: &PipelineConfig, from: &str, to: &str) -> String 
         let input = &config.inputs[0].name;
         return match (from, to) {
             ("input.0", "demux.0") => format!("{input}.transport"),
-            ("demux.0", "video.decode.0") => format!("{input}.videoDecode"),
-            ("demux.0", "audio.decode.0") => format!("{input}.audioDecode"),
+            ("demux.0", "video.decode.0") | ("input.0", "video.decode.0") => {
+                format!("{input}.videoDecode")
+            }
+            ("demux.0", "audio.decode.0") | ("input.0", "audio.decode.0") => {
+                format!("{input}.audioDecode")
+            }
             ("video.decode.0", "video.timeline") | ("video.timeline", "video.encode") => {
                 format!("{input}.videoTimeline")
             }
@@ -836,6 +883,10 @@ impl ControllerHandle {
 
     pub(crate) async fn set_input_srt(&self, index: usize, stats: SrtRuntimeStats) {
         self.inner.lock().await.set_input_srt(index, stats);
+    }
+
+    pub(crate) async fn set_input_rtsp(&self, index: usize, stats: RtspRuntimeStats) {
+        self.inner.lock().await.set_input_rtsp(index, stats);
     }
 
     pub(crate) async fn set_output_srt(&self, stats: SrtRuntimeStats) {

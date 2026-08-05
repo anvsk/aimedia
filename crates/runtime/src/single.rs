@@ -13,8 +13,8 @@ use aimedia_core::{
     PipelineConfig, PipelineRuntimeState, Timestamp,
     backend::{
         AudioDecoder, AudioEncoder, AudioFrame, BackendError, CodecId, GpuSurfaceObserver,
-        MediaPacket, Transport, TransportChunk, TransportObserver, VideoDecoder, VideoEncoder,
-        VideoFrame,
+        MediaPacket, PacketSource, PacketSourceObserver, Transport, TransportChunk,
+        TransportObserver, VideoDecoder, VideoEncoder, VideoFrame,
     },
 };
 use aimedia_graph::{ExecutionPlan, FullPolicy, JobMode, compile as compile_plan};
@@ -51,7 +51,7 @@ pub enum SinglePipelineError {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct SingleQueuePlan {
-    transport_messages: usize,
+    transport_messages: Option<usize>,
     video_packets: usize,
     audio_packets: usize,
     video_frames: usize,
@@ -102,6 +102,19 @@ impl TimedAudioFrame {
 
 impl SingleQueuePlan {
     fn from_plan(plan: &ExecutionPlan) -> Result<Self, RuntimePlanError> {
+        let (transport_messages, packet_source) = if plan.edge("input.0", "demux.0").is_some() {
+            (
+                Some(plan_queue_capacity(
+                    plan,
+                    "input.0",
+                    "demux.0",
+                    FullPolicy::Backpressure,
+                )?),
+                "demux.0",
+            )
+        } else {
+            (None, "input.0")
+        };
         let video_output = plan_queue_capacity(
             plan,
             "video.encode",
@@ -131,21 +144,16 @@ impl SingleQueuePlan {
             )));
         }
         Ok(Self {
-            transport_messages: plan_queue_capacity(
-                plan,
-                "input.0",
-                "demux.0",
-                FullPolicy::Backpressure,
-            )?,
+            transport_messages,
             video_packets: plan_queue_capacity(
                 plan,
-                "demux.0",
+                packet_source,
                 "video.decode.0",
                 FullPolicy::Backpressure,
             )?,
             audio_packets: plan_queue_capacity(
                 plan,
-                "demux.0",
+                packet_source,
                 "audio.decode.0",
                 FullPolicy::Backpressure,
             )?,
@@ -161,8 +169,22 @@ impl SingleQueuePlan {
     }
 }
 
+pub enum SingleInput {
+    Transport(Box<dyn Transport>),
+    Packets(Box<dyn PacketSource>),
+}
+
+impl std::fmt::Debug for SingleInput {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Transport(_) => formatter.write_str("SingleInput::Transport(..)"),
+            Self::Packets(_) => formatter.write_str("SingleInput::Packets(..)"),
+        }
+    }
+}
+
 pub struct SinglePipelineBackends {
-    pub input: Box<dyn Transport>,
+    pub input: SingleInput,
     pub output: Box<dyn Transport>,
     pub video_decoder: Box<dyn VideoDecoder>,
     pub video_encoder: Box<dyn VideoEncoder>,
@@ -236,7 +258,14 @@ impl SinglePipeline {
             audio_decoder,
             audio_encoder,
         } = backends;
-        let input_observer = input.observer();
+        let input_observer = match &input {
+            SingleInput::Transport(input) => input.observer(),
+            SingleInput::Packets(_) => None,
+        };
+        let packet_observer = match &input {
+            SingleInput::Packets(input) => input.observer(),
+            SingleInput::Transport(_) => None,
+        };
         let output_observer = output.observer();
         let surface_observer = video_decoder.surface_observer();
         let queues = SingleQueuePlan::from_plan(&plan)?;
@@ -249,7 +278,6 @@ impl SinglePipeline {
             1,
         )));
 
-        let (transport_tx, transport_rx) = mpsc::channel(queues.transport_messages);
         let (video_packet_tx, video_packet_rx) = mpsc::channel(queues.video_packets);
         let (audio_packet_tx, audio_packet_rx) = mpsc::channel(queues.audio_packets);
         let (video_frame_tx, video_frame_rx) = mpsc::channel(queues.video_frames);
@@ -272,6 +300,14 @@ impl SinglePipeline {
                 monitor_stop_rx.clone(),
             ));
         }
+        if let Some(observer) = packet_observer.as_ref() {
+            monitors.spawn(monitor_packet_source(
+                Arc::clone(observer),
+                0,
+                controller.clone(),
+                monitor_stop_rx.clone(),
+            ));
+        }
         if let Some(observer) = output_observer {
             monitors.spawn(monitor_transport(
                 observer,
@@ -289,33 +325,71 @@ impl SinglePipeline {
             ));
         }
 
-        let receive_controller = controller.clone();
-        let receive_queue = format!("{input_name}.transport");
-        tasks.spawn(async move {
-            (
-                "receive",
-                receive_transport(input, transport_tx, receive_controller, receive_queue).await,
-            )
-        });
-        let demux_controller = controller.clone();
-        let demux_transport_queue = format!("{input_name}.transport");
-        let demux_video_queue = format!("{input_name}.videoDecode");
-        let demux_audio_queue = format!("{input_name}.audioDecode");
-        tasks.spawn(async move {
-            (
-                "demux",
-                demux_transport(
-                    transport_rx,
-                    video_packet_tx,
-                    audio_packet_tx,
-                    demux_controller,
-                    demux_transport_queue,
-                    demux_video_queue,
-                    demux_audio_queue,
-                )
-                .await,
-            )
-        });
+        let expected_tasks = match input {
+            SingleInput::Transport(input) => {
+                let transport_messages = queues.transport_messages.ok_or_else(|| {
+                    RuntimePlanError::Invariant(
+                        "transport input requires an input-to-demux queue".to_owned(),
+                    )
+                })?;
+                let (transport_tx, transport_rx) = mpsc::channel(transport_messages);
+                let receive_controller = controller.clone();
+                let receive_queue = format!("{input_name}.transport");
+                tasks.spawn(async move {
+                    (
+                        "receive",
+                        receive_transport(input, transport_tx, receive_controller, receive_queue)
+                            .await,
+                    )
+                });
+                let demux_controller = controller.clone();
+                let demux_transport_queue = format!("{input_name}.transport");
+                let demux_video_queue = format!("{input_name}.videoDecode");
+                let demux_audio_queue = format!("{input_name}.audioDecode");
+                tasks.spawn(async move {
+                    (
+                        "demux",
+                        demux_transport(
+                            transport_rx,
+                            video_packet_tx,
+                            audio_packet_tx,
+                            demux_controller,
+                            demux_transport_queue,
+                            demux_video_queue,
+                            demux_audio_queue,
+                        )
+                        .await,
+                    )
+                });
+                7
+            }
+            SingleInput::Packets(input) => {
+                if queues.transport_messages.is_some() {
+                    return Err(RuntimePlanError::Invariant(
+                        "packet source must connect directly to codec queues".to_owned(),
+                    )
+                    .into());
+                }
+                let source_controller = controller.clone();
+                let source_video_queue = format!("{input_name}.videoDecode");
+                let source_audio_queue = format!("{input_name}.audioDecode");
+                tasks.spawn(async move {
+                    (
+                        "packetSource",
+                        receive_packets(
+                            input,
+                            video_packet_tx,
+                            audio_packet_tx,
+                            source_controller,
+                            source_video_queue,
+                            source_audio_queue,
+                        )
+                        .await,
+                    )
+                });
+                6
+            }
+        };
         let video_decode_controller = controller.clone();
         let video_decode_input_queue = format!("{input_name}.videoDecode");
         let video_decode_output_queue = format!("{input_name}.videoTimeline");
@@ -407,7 +481,7 @@ impl SinglePipeline {
             match tasks.join_next().await {
                 Some(Ok((_name, Ok(())))) => {
                     completed += 1;
-                    if completed == 7 {
+                    if completed == expected_tasks {
                         break None;
                     }
                 }
@@ -424,17 +498,70 @@ impl SinglePipeline {
         if let Some(error) = failure {
             tasks.abort_all();
             while tasks.join_next().await.is_some() {}
+            if let Some(observer) = packet_observer.as_ref()
+                && let Ok(stats) = observer.stats().await
+            {
+                controller.set_input_rtsp(0, stats).await;
+            }
             let _ = monitor_stop.send(true);
             while monitors.join_next().await.is_some() {}
             controller.finish().await;
             return Err(error);
         }
 
+        if let Some(observer) = packet_observer.as_ref()
+            && let Ok(stats) = observer.stats().await
+        {
+            controller.set_input_rtsp(0, stats).await;
+        }
         let _ = monitor_stop.send(true);
         while monitors.join_next().await.is_some() {}
         controller.finish().await;
         Ok(controller.state().await)
     }
+}
+
+async fn receive_packets(
+    mut input: Box<dyn PacketSource>,
+    video_sender: mpsc::Sender<Timed<MediaPacket>>,
+    audio_sender: mpsc::Sender<Timed<MediaPacket>>,
+    controller: ControllerHandle,
+    video_queue: String,
+    audio_queue: String,
+) -> Result<(), SinglePipelineError> {
+    loop {
+        match input.receive_packet().await {
+            Ok(packet) => {
+                if packet.discontinuity {
+                    controller.mark_input_discontinuity(0).await;
+                }
+                let (sender, queue) = match packet.codec {
+                    CodecId::H264 => (&video_sender, &video_queue),
+                    CodecId::AacLc | CodecId::G711Alaw | CodecId::G711Mulaw => {
+                        (&audio_sender, &audio_queue)
+                    }
+                    codec => return Err(SinglePipelineError::EncodedCodec(codec)),
+                };
+                send_observed(
+                    sender,
+                    Timed {
+                        value: packet,
+                        entered_at: Instant::now(),
+                    },
+                    &controller,
+                    queue,
+                )
+                .await?;
+            }
+            Err(BackendError::EndOfStream) => break,
+            Err(error) => {
+                let _ = input.close().await;
+                return Err(error.into());
+            }
+        }
+    }
+    input.close().await?;
+    Ok(())
 }
 
 async fn send_observed<T>(
@@ -562,6 +689,29 @@ async fn monitor_transport(
                 Err(error) => {
                     tracing::warn!(?target, %error, "could not sample transport state");
                 }
+            }
+        }
+    }
+}
+
+async fn monitor_packet_source(
+    observer: Arc<dyn PacketSourceObserver>,
+    input: usize,
+    controller: ControllerHandle,
+    mut stop: watch::Receiver<bool>,
+) {
+    let mut interval = tokio::time::interval(Duration::from_millis(250));
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    loop {
+        tokio::select! {
+            changed = stop.changed() => {
+                if changed.is_err() || *stop.borrow() {
+                    break;
+                }
+            }
+            _ = interval.tick() => match observer.stats().await {
+                Ok(stats) => controller.set_input_rtsp(input, stats).await,
+                Err(error) => tracing::warn!(input, %error, "could not sample packet-source state"),
             }
         }
     }
@@ -736,14 +886,13 @@ async fn decode_audio(
     while let Some(packet) = receiver.recv().await {
         controller.observe_queue(&input_queue, receiver.len()).await;
         let entered_at = packet.entered_at;
+        let codec = packet.value.codec;
         let first_permit = Arc::clone(&decode_gate)
             .acquire_owned()
             .await
             .map_err(|_| SinglePipelineError::ChannelClosed(output_queue.clone()))?;
         let frames = decoder.decode(packet.value).await?;
-        controller
-            .record_decoded(CodecId::AacLc, frames.len())
-            .await;
+        controller.record_decoded(codec, frames.len()).await;
         let mut first_permit = Some(first_permit);
         for frame in frames {
             let decode_gate = match first_permit.take() {
@@ -1040,15 +1189,15 @@ mod tests {
         PipelineConfig, Timestamp,
         backend::{
             AudioDecoder, AudioEncoder, AudioFrame, BackendError, CodecId, MediaPacket,
-            MemoryDomain, PixelFormat, SurfaceLease, Transport, TransportChunk, VideoDecoder,
-            VideoEncoder, VideoFrame, VideoSurface,
+            MemoryDomain, PacketSource, PixelFormat, SurfaceLease, Transport, TransportChunk,
+            VideoDecoder, VideoEncoder, VideoFrame, VideoSurface,
         },
     };
     use aimedia_mpegts::{DemuxEvent, MuxPacket, MuxStream, StreamDemuxer, StreamMuxer};
     use async_trait::async_trait;
     use bytes::Bytes;
 
-    use super::{SinglePipeline, SinglePipelineBackends};
+    use super::{SingleInput, SinglePipeline, SinglePipelineBackends};
 
     #[derive(Debug)]
     struct FakeTransport {
@@ -1071,6 +1220,22 @@ mod tests {
         async fn send(&mut self, payload: &[u8]) -> Result<(), BackendError> {
             self.sent.lock().expect("sent lock").push(payload.to_vec());
             Ok(())
+        }
+
+        async fn close(&mut self) -> Result<(), BackendError> {
+            Ok(())
+        }
+    }
+
+    #[derive(Debug)]
+    struct FakePacketSource {
+        packets: VecDeque<MediaPacket>,
+    }
+
+    #[async_trait]
+    impl PacketSource for FakePacketSource {
+        async fn receive_packet(&mut self) -> Result<MediaPacket, BackendError> {
+            self.packets.pop_front().ok_or(BackendError::EndOfStream)
         }
 
         async fn close(&mut self) -> Result<(), BackendError> {
@@ -1215,10 +1380,10 @@ mod tests {
         let pipeline = SinglePipeline::new(
             config,
             SinglePipelineBackends {
-                input: Box::new(FakeTransport {
+                input: SingleInput::Transport(Box::new(FakeTransport {
                     receive: input_transport().into(),
                     sent: Arc::new(StdMutex::new(Vec::new())),
-                }),
+                })),
                 output: Box::new(FakeTransport {
                     receive: VecDeque::new(),
                     sent: Arc::clone(&sent),
@@ -1280,5 +1445,59 @@ mod tests {
         assert!(video_pts.windows(2).all(|pair| pair[0] < pair[1]));
         assert!(audio_pts.windows(2).all(|pair| pair[0] < pair[1]));
         assert_eq!(Timestamp::MPEG_TS_TIMESCALE, 90_000);
+    }
+
+    #[tokio::test]
+    async fn rtsp_packet_source_bypasses_ts_demux_and_uses_the_same_bounded_codecs() {
+        let config = PipelineConfig::from_yaml(include_str!("../../../examples/rtsp.yaml"))
+            .expect("RTSP config");
+        let packets = VecDeque::from([
+            MediaPacket {
+                stream_id: 0,
+                codec: CodecId::H264,
+                pts: Timestamp::new(90_000, 90_000),
+                dts: Some(Timestamp::new(90_000, 90_000)),
+                duration: None,
+                keyframe: true,
+                discontinuity: false,
+                data: Bytes::from_static(&[0, 0, 0, 1, 0x65, 0x88]),
+            },
+            MediaPacket {
+                stream_id: 1,
+                codec: CodecId::AacLc,
+                pts: Timestamp::new(48_000, 48_000),
+                dts: None,
+                duration: Some(Timestamp::new(1_024, 48_000)),
+                keyframe: true,
+                discontinuity: false,
+                data: Bytes::from_static(&[
+                    0xff, 0xf1, 0x4c, 0x80, 0x01, 0x7f, 0xfc, 0x11, 0x22, 0x33, 0x44,
+                ]),
+            },
+        ]);
+        let sent = Arc::new(StdMutex::new(Vec::new()));
+        let pipeline = SinglePipeline::new(
+            config,
+            SinglePipelineBackends {
+                input: SingleInput::Packets(Box::new(FakePacketSource { packets })),
+                output: Box::new(FakeTransport {
+                    receive: VecDeque::new(),
+                    sent,
+                }),
+                video_decoder: Box::new(FakeVideoDecoder),
+                video_encoder: Box::new(FakeVideoEncoder),
+                audio_decoder: Box::new(FakeAudioDecoder),
+                audio_encoder: Box::new(FakeAudioEncoder),
+            },
+        )
+        .expect("RTSP packet pipeline builds");
+        assert!(pipeline.plan().edge("input.0", "demux.0").is_none());
+        assert!(pipeline.plan().edge("input.0", "video.decode.0").is_some());
+
+        let state = pipeline.run().await.expect("packet pipeline completes");
+        assert_eq!(state.inputs[0].codec.video_decoded_frames, 1);
+        assert_eq!(state.inputs[0].codec.audio_decoded_frames, 1);
+        assert!(state.inputs[0].rtsp.is_some());
+        assert!(state.queues.iter().all(|queue| queue.depth == 0));
     }
 }
