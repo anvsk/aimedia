@@ -84,11 +84,14 @@ name = "aimedia-nvidia"
 version = "0.1.0-alpha.1"
 dependencies = [
  "aimedia-core",
+ "async-trait",
  "bindgen",
  "libloading",
  "serde",
  "sha2",
  "thiserror",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

@@ -1,4 +1,4 @@
-use std::{fmt, sync::Arc};
+use std::{any::Any, fmt, sync::Arc};
 
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -36,6 +36,9 @@ pub struct MediaPacket {
 pub trait SurfaceLease: Send + Sync {
     /// Opaque backend handle. Only the backend that created the lease may interpret it.
     fn handle(&self) -> u64;
+
+    /// Lets a backend recover its own typed metadata without exposing it to the media core.
+    fn as_any(&self) -> &dyn Any;
 }
 
 #[derive(Clone)]
@@ -54,6 +57,11 @@ impl VideoSurface {
     #[must_use]
     pub fn handle(&self) -> u64 {
         self.lease.handle()
+    }
+
+    #[must_use]
+    pub fn downcast_ref<T: SurfaceLease + 'static>(&self) -> Option<&T> {
+        self.lease.as_any().downcast_ref()
     }
 }
 

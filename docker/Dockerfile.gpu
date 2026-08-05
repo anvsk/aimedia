@@ -1,4 +1,13 @@
-FROM nvidia/cuda:12.9.1-devel-ubuntu24.04 AS cuda-headers
+FROM debian:bookworm-slim AS nvcodec-headers
+ARG NVCODEC_HEADERS_REF=e844e5b26f46bb77479f063029595293aa8f812d
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates git \
+    && rm -rf /var/lib/apt/lists/* \
+    && git init /src/nv-codec-headers \
+    && git -C /src/nv-codec-headers remote add origin https://github.com/FFmpeg/nv-codec-headers.git \
+    && git -C /src/nv-codec-headers fetch --depth 1 origin "${NVCODEC_HEADERS_REF}" \
+    && git -C /src/nv-codec-headers checkout --detach FETCH_HEAD \
+    && test "$(git -C /src/nv-codec-headers rev-parse HEAD)" = "${NVCODEC_HEADERS_REF}"
 
 FROM rust:1.88-bookworm AS rust-builder
 WORKDIR /src
@@ -6,6 +15,19 @@ COPY . .
 RUN cargo build --locked --release -p aimedia
 
 FROM rust-builder AS rust-builder-sdk
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends clang libclang-dev \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=nvcodec-headers /src/nv-codec-headers /opt/nv-codec-headers
+ARG VIDEO_CODEC_SDK_EXPECTED_SHA256
+RUN AIMEDIA_NVCODEC_HEADERS_PATH=/opt/nv-codec-headers \
+    AIMEDIA_VIDEO_CODEC_SDK_EXPECTED_SHA256="${VIDEO_CODEC_SDK_EXPECTED_SHA256}" \
+    cargo build --locked --release -p aimedia \
+      --features aimedia-nvidia/video-codec-sdk
+
+FROM nvidia/cuda:12.9.1-devel-ubuntu24.04 AS cuda-headers
+
+FROM rust-builder AS rust-builder-sdk-official
 RUN apt-get update \
     && apt-get install -y --no-install-recommends clang libclang-dev \
     && rm -rf /var/lib/apt/lists/*
@@ -85,6 +107,10 @@ RUN ldconfig \
        -- --ignored --nocapture
 
 FROM rust-builder-sdk AS sdk-build-test
+RUN AIMEDIA_NVCODEC_HEADERS_PATH=/opt/nv-codec-headers \
+    cargo test --locked -p aimedia-nvidia --features video-codec-sdk
+
+FROM rust-builder-sdk-official AS sdk-build-test-official
 RUN AIMEDIA_VIDEO_CODEC_SDK_PATH=/opt/video-codec-sdk \
     AIMEDIA_CUDA_INCLUDE_PATH=/opt/cuda/include \
     cargo test --locked -p aimedia-nvidia --features video-codec-sdk
@@ -107,3 +133,7 @@ COPY --from=rust-builder /src/target/release/aimedia /usr/local/bin/aimedia
 
 FROM runtime-base AS sdk-runtime
 COPY --from=rust-builder-sdk /src/target/release/aimedia /usr/local/bin/aimedia
+COPY --from=nvcodec-headers /src/nv-codec-headers/LICENSE /usr/local/share/licenses/nv-codec-headers/LICENSE
+
+FROM runtime-base AS sdk-runtime-official
+COPY --from=rust-builder-sdk-official /src/target/release/aimedia /usr/local/bin/aimedia

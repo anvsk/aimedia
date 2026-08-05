@@ -32,12 +32,12 @@
 - libsrt caller/listener adapter、重连状态和敏感信息校验；
 - libxaac AAC-LC 帧级 adapter、1024-sample 时间线和 native round-trip；
 - 独立节目时钟、固定容量单路调度器、fake transport/codec 验证；
-- NVIDIA SDK 探测、GPU surface lease 契约、本机控制协议；
+- NVIDIA SDK 探测、实验性 NVDEC 帧解码与代际 surface lease、本机控制协议；
 - 双输入确定性导播、音频 DSP、VLM contract、replay、bench 和 fuzz。
 
 尚未完成，也不会伪装为已经完成：
 
-- NVDEC/NVENC 帧提交和 GPU surface copy；
+- NVENC 帧提交和 NVDEC 到 NVENC 的 GPU surface copy；
 - 生产 SRT、codec 与调度器的完整接线；
 - 断流期间最后一帧和静音保活；
 - 真实单路 GPU 持续输出、互操作和两小时 soak；
