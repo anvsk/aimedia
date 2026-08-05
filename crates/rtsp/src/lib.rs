@@ -15,10 +15,10 @@ use std::{
 };
 
 use aimedia_core::{
-    RtspRuntimeStats, Timestamp,
+    Timestamp,
     backend::{
         AudioDecoder, AudioFrame, BackendError, CodecId, MediaPacket, PacketSource,
-        PacketSourceObserver,
+        PacketSourceObserver, PacketSourceRuntimeStats,
     },
     config::{ReconnectConfig, RtspConfig, RtspTransport, SecretError},
 };
@@ -829,8 +829,8 @@ impl RtspStatsState {
         *self.last_data.lock().expect("RTSP stats lock poisoned") = Some(Instant::now());
     }
 
-    fn snapshot(&self) -> RtspRuntimeStats {
-        RtspRuntimeStats {
+    fn snapshot(&self) -> PacketSourceRuntimeStats {
+        PacketSourceRuntimeStats {
             connected: self.connected.load(Ordering::Relaxed),
             transport: match self.transport {
                 RtspTransport::Tcp => "tcp",
@@ -856,7 +856,7 @@ struct RtspObserver {
 
 #[async_trait]
 impl PacketSourceObserver for RtspObserver {
-    async fn stats(&self) -> Result<RtspRuntimeStats, BackendError> {
+    async fn stats(&self) -> Result<PacketSourceRuntimeStats, BackendError> {
         Ok(self.state.snapshot())
     }
 }

@@ -5,7 +5,7 @@ use bytes::Bytes;
 use thiserror::Error;
 
 use crate::{
-    control::{GpuSurfaceRuntimeStats, RtspRuntimeStats, SrtRuntimeStats},
+    control::{GpuSurfaceRuntimeStats, SrtRuntimeStats},
     director::FastSignals,
     time::Timestamp,
 };
@@ -159,7 +159,17 @@ pub trait PacketSource: Send {
 
 #[async_trait]
 pub trait PacketSourceObserver: Send + Sync {
-    async fn stats(&self) -> Result<RtspRuntimeStats, BackendError>;
+    async fn stats(&self) -> Result<PacketSourceRuntimeStats, BackendError>;
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PacketSourceRuntimeStats {
+    pub connected: bool,
+    pub transport: String,
+    pub packets_received: u64,
+    pub packets_lost: u64,
+    pub reconnects: u64,
+    pub last_data_age_ms: Option<u64>,
 }
 
 pub trait GpuSurfaceObserver: Send + Sync {

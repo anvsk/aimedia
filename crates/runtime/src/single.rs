@@ -10,11 +10,11 @@ use std::sync::{
 use std::time::{Duration, Instant};
 
 use aimedia_core::{
-    PipelineConfig, PipelineRuntimeState, Timestamp,
+    PipelineConfig, PipelineRuntimeState, RtspRuntimeStats, Timestamp,
     backend::{
         AudioDecoder, AudioEncoder, AudioFrame, BackendError, CodecId, GpuSurfaceObserver,
-        MediaPacket, PacketSource, PacketSourceObserver, Transport, TransportChunk,
-        TransportObserver, VideoDecoder, VideoEncoder, VideoFrame,
+        MediaPacket, PacketSource, PacketSourceObserver, PacketSourceRuntimeStats, Transport,
+        TransportChunk, TransportObserver, VideoDecoder, VideoEncoder, VideoFrame,
     },
 };
 use aimedia_graph::{ExecutionPlan, FullPolicy, JobMode, compile as compile_plan};
@@ -501,7 +501,7 @@ impl SinglePipeline {
             if let Some(observer) = packet_observer.as_ref()
                 && let Ok(stats) = observer.stats().await
             {
-                controller.set_input_rtsp(0, stats).await;
+                controller.set_input_rtsp(0, rtsp_stats(stats)).await;
             }
             let _ = monitor_stop.send(true);
             while monitors.join_next().await.is_some() {}
@@ -512,7 +512,7 @@ impl SinglePipeline {
         if let Some(observer) = packet_observer.as_ref()
             && let Ok(stats) = observer.stats().await
         {
-            controller.set_input_rtsp(0, stats).await;
+            controller.set_input_rtsp(0, rtsp_stats(stats)).await;
         }
         let _ = monitor_stop.send(true);
         while monitors.join_next().await.is_some() {}
@@ -710,10 +710,21 @@ async fn monitor_packet_source(
                 }
             }
             _ = interval.tick() => match observer.stats().await {
-                Ok(stats) => controller.set_input_rtsp(input, stats).await,
+                Ok(stats) => controller.set_input_rtsp(input, rtsp_stats(stats)).await,
                 Err(error) => tracing::warn!(input, %error, "could not sample packet-source state"),
             }
         }
+    }
+}
+
+fn rtsp_stats(stats: PacketSourceRuntimeStats) -> RtspRuntimeStats {
+    RtspRuntimeStats {
+        connected: stats.connected,
+        transport: stats.transport,
+        packets_received: stats.packets_received,
+        packets_lost: stats.packets_lost,
+        reconnects: stats.reconnects,
+        last_data_age_ms: stats.last_data_age_ms,
     }
 }
 
