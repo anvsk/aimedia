@@ -59,8 +59,11 @@
   从计划读取队列与资源约束；配置、`explain` 和运行时不再各维护一套拓扑。
   证据：PR [#11](https://github.com/anvsk/aimedia/pull/11)，计划/运行时差分测试、Linux
   workspace、严格 Clippy、依赖许可证和 Docker build/smoke 全绿。
-- [ ] **V2-03 NVDEC 帧级后端**：H.264 access unit 输入、格式回调、leased NV12 surface、
+- [x] **V2-03 NVDEC 帧级后端**：H.264 access unit 输入、格式回调、leased NV12 surface、
   discontinuity reset、IDR 重新同步和 GPU 错误映射。
+  证据：PR [#12](https://github.com/anvsk/aimedia/pull/12)，固定 SDK 13.0 ABI headers
+  的 feature test/严格 Clippy、workspace/fuzz CI 全绿；RTX 5060 Laptop + 577.12 驱动
+  通过真实 IDR 解码、NV12 map/unmap、延迟到下一 IDR 的代际重建及跨代 lease 释放。
 - [ ] **V2-04 NVENC 帧级后端**：持久输入 surface、H.264 Main/CBR/无 B 帧/1 秒 GOP、
   强制 IDR、SPS/PPS 和 flush。
 - [ ] **V2-05 生产后端装配**：把 libsrt、MPEG-TS、NVDEC/NVENC 和 libxaac 注入单路
