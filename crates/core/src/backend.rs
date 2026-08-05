@@ -14,6 +14,8 @@ use crate::{
 pub enum CodecId {
     H264,
     AacLc,
+    G711Alaw,
+    G711Mulaw,
     PcmF32,
     Unknown(u32),
 }
@@ -138,6 +140,36 @@ pub trait Transport: Send {
     fn observer(&self) -> Option<Arc<dyn TransportObserver>> {
         None
     }
+}
+
+/// Pull-based source for protocols that already expose codec access units.
+///
+/// SRT/MPEG-TS uses [`Transport`] plus the streaming TS demuxer. RTSP/RTP performs
+/// depacketization inside its protocol adapter and enters the runtime through this trait instead
+/// of being serialized into a synthetic transport stream.
+#[async_trait]
+pub trait PacketSource: Send {
+    async fn receive_packet(&mut self) -> Result<MediaPacket, BackendError>;
+    async fn close(&mut self) -> Result<(), BackendError>;
+
+    fn observer(&self) -> Option<Arc<dyn PacketSourceObserver>> {
+        None
+    }
+}
+
+#[async_trait]
+pub trait PacketSourceObserver: Send + Sync {
+    async fn stats(&self) -> Result<PacketSourceRuntimeStats, BackendError>;
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PacketSourceRuntimeStats {
+    pub connected: bool,
+    pub transport: String,
+    pub packets_received: u64,
+    pub packets_lost: u64,
+    pub reconnects: u64,
+    pub last_data_age_ms: Option<u64>,
 }
 
 pub trait GpuSurfaceObserver: Send + Sync {

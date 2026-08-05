@@ -225,6 +225,18 @@ pub struct SrtRuntimeStats {
     pub last_data_age_ms: Option<u64>,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RtspRuntimeStats {
+    pub connected: bool,
+    pub transport: String,
+    pub packets_received: u64,
+    pub packets_lost: u64,
+    pub reconnects: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_data_age_ms: Option<u64>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct InputRuntimeState {
@@ -236,6 +248,8 @@ pub struct InputRuntimeState {
     pub video_timeline_depth: usize,
     pub audio_timeline_depth: usize,
     pub srt: SrtRuntimeStats,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rtsp: Option<RtspRuntimeStats>,
     #[serde(default)]
     pub codec: InputCodecRuntimeStats,
     #[serde(default)]

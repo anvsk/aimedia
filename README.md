@@ -30,7 +30,8 @@
 - `aimedia-graph`：把现有配置编译为类型化、有界的执行计划；
 - 流式 MPEG-TS demux/mux、PSI/PES、PTS 回绕、PAT/PMT/PCR；
 - libsrt caller/listener adapter、重连状态和敏感信息校验；
-- `retina 0.4.19` 后的 RTSP/RTP 会话边界、SDP 轨道选择和类型化媒体事件；
+- `retina 0.4.19` 后的 RTSP/RTP 会话边界，以及 TCP interleaved H.264/AAC/G.711
+  到单路 native runtime 的直接有界接线；
 - libxaac AAC-LC 帧级 adapter、1024-sample 时间线和 native round-trip；
 - 独立节目时钟、固定容量单路调度器、fake transport/codec 验证；
 - NVIDIA SDK 探测、实验性 NVDEC/NVENC 帧后端、GPU 内 NV12 复制与代际 surface lease、
@@ -45,6 +46,7 @@
 
 - 多输出和 Analyzer Tap 数据面。通用 `MediaJob` v2 配置已经取代旧导播配置；旧文件
   只能通过显式转换命令迁移，不会在运行时静默兼容。
+- RTSP UDP、H.265 bridge、外部摄像机兼容和长稳；当前 TCP 路径保持 `experimental`。
 
 单路 SRT 原生 GPU 数据面已通过 FFmpeg/OBS/VLC 互操作、网络损伤、断流恢复和
 [1080p30 两小时门禁](docs/reports/v0.2-native-live-pipe.md)，在固定支持范围内标记为

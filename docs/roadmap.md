@@ -142,7 +142,12 @@ v0.3 工程。只有 V2-11 也完成后，总览才把 v0.2 标记为完全完�
     证据：PR [#27](https://github.com/anvsk/aimedia/pull/27)，Rust 1.88 workspace 门禁、
     cargo-deny 全项通过、Docker smoke，以及 `DESCRIBE/SETUP/PLAY/RTP/TEARDOWN`
     本机伪摄像机闭环。
-  - [ ] V3-02C：TCP interleaved H.264/AAC/G.711 单路运行时闭环。
+  - [x] V3-02C：TCP interleaved H.264/AAC/G.711 单路运行时闭环。
+    证据：PR [#28](https://github.com/anvsk/aimedia/pull/28)，RTSP/RTP access unit
+    直接进入有界 codec 队列，不伪造 MPEG-TS；本机伪摄像机、G.711 8kHz 单声道到
+    48kHz 双声道桥接、RTSP 状态、Linux workspace 43 项测试、严格 Clippy、
+    cargo-deny、release Docker build 和 `explain` 图烟雾检查通过。外部摄像机、GPU
+    真实闭环和长稳仍由 V3-02F 验收，因此尚不升级为 `supported`。
   - [ ] V3-02D：UDP RTP/RTCP、固定重排窗口、超时和重连。
   - [ ] V3-02E：H.265 RTP 重组、明确 bridge pending 与 V3-04 handoff。
   - [ ] V3-02F：外部设备、网络损伤、两小时 soak 和支持矩阵升级。

@@ -19,6 +19,7 @@ aimedia-graph = { version = "0.2.0-alpha.1", path = "../graph" }
 aimedia-mpegts = { version = "0.2.0-alpha.1", path = "../mpegts" }
 aimedia-nvidia = { version = "0.2.0-alpha.1", path = "../nvidia" }
 aimedia-runtime = { version = "0.2.0-alpha.1", path = "../runtime" }
+aimedia-rtsp = { version = "0.2.0-alpha.1", path = "../rtsp" }
 aimedia-srt = { version = "0.2.0-alpha.1", path = "../srt" }
 anyhow.workspace = true
 clap.workspace = true

@@ -24,7 +24,7 @@
 | BS.1770/4x true-peak DSP | foundation | 响度、增益、淡化和 limiter 已实现；AAC 帧级 codec 已就绪，待接运行时音频链 |
 | SRT caller/listener | supported | libsrt 1.5.5 adapter、epoll、指数退避和断开后 native 重连已测；caller/listener 四种组合、断流恢复、1% 丢包/20ms 抖动/40ms RTT 及两小时长稳已验证 |
 | RTMP/RTMPS + FLV | planned | v0.3 跨区域平台发布基线 |
-| RTSP/RTP input | foundation | `crates/rtsp` 已完成 RTSP 1.0 会话、Basic/Digest 鉴权传递、TCP/UDP、SDP 轨道选择、H.264/H.265/AAC-LC/G.711 类型化事件和本机伪摄像机闭环；尚未接入 `aimedia run` 编解码数据面，不代表已兼容外部摄像机或 GB28181 |
+| RTSP/RTP input | experimental | `aimedia run` 已接 TCP interleaved 单路数据面：RTP 拆包后的 H.264/AAC-LC/G.711 直接进入有界 codec 队列，G.711 8kHz 单声道归一到 48kHz 双声道，状态报告连接、媒体包、丢包和最后数据时间；当前明确拒绝 UDP、H.265 bridge 和非 48kHz 双声道 AAC，尚未通过外部摄像机、GPU 闭环、网络损伤或长稳，不代表 GB28181 支持 |
 | 多输出与 Analyzer Tap | planned | v0.4；每个支路独立有界并与媒体主链隔离 |
 | WHIP output | planned | v0.6 以后按真实服务采用证据评估；H.264/Opus |
 | NVDEC | supported | H.264 parser callback、NV12 map/unmap、代际 surface lease、discontinuity/IDR 闸门已实现；RTX 5060 Laptop、577.12 驱动完成两小时真实解码，零丢帧、surface 高水位 3/4 |

@@ -16,10 +16,8 @@ pub enum CompileError {
     #[error("the current graph compiler supports one or two inputs, got {0}")]
     InputCount(usize),
     #[error(
-        "input {input:?} declares RTSP correctly and the session adapter exists, but runtime graph integration is pending V3-02C"
+        "input {input:?} uses unsupported transport {uri:?}; only SRT and RTSP are available now"
     )]
-    RtspAdapterPending { input: String },
-    #[error("input {input:?} uses unsupported transport {uri:?}; only SRT is available now")]
     UnsupportedInputTransport { input: String, uri: String },
     #[error("output uses unsupported transport {0:?}; only SRT is available now")]
     UnsupportedOutputTransport(String),
@@ -70,6 +68,7 @@ pub enum MediaType {
     MpegTs,
     H264AccessUnit,
     AacAdts,
+    CompressedAudio,
     Nv12Video,
     F32Pcm,
     AnalysisEvent,
@@ -214,12 +213,7 @@ pub fn compile(config: &PipelineConfig) -> Result<ExecutionPlan, CompileError> {
         return Err(CompileError::InputCount(config.inputs.len()));
     }
     for input in &config.inputs {
-        if is_rtsp(&input.uri) {
-            return Err(CompileError::RtspAdapterPending {
-                input: input.name.clone(),
-            });
-        }
-        if !is_srt(&input.uri) {
+        if !is_srt(&input.uri) && !is_rtsp(&input.uri) {
             return Err(CompileError::UnsupportedInputTransport {
                 input: input.name.clone(),
                 uri: input.uri.clone(),
@@ -246,23 +240,30 @@ pub fn compile(config: &PipelineConfig) -> Result<ExecutionPlan, CompileError> {
         let demux = format!("demux.{index}");
         let video_decode = format!("video.decode.{index}");
         let audio_decode = format!("audio.decode.{index}");
-        nodes.extend([
-            node(
-                &source,
-                NodeKind::TransportInput,
-                MemoryDomain::Host,
-                true,
-                NodeStatus::AdapterReady,
-                format!("SRT input {}", input.name),
-            ),
-            node(
+        let rtsp = is_rtsp(&input.uri);
+        nodes.push(node(
+            &source,
+            NodeKind::TransportInput,
+            MemoryDomain::Host,
+            true,
+            NodeStatus::AdapterReady,
+            if rtsp {
+                format!("RTSP/RTP input and bounded depacketizer {}", input.name)
+            } else {
+                format!("SRT input {}", input.name)
+            },
+        ));
+        if !rtsp {
+            nodes.push(node(
                 &demux,
                 NodeKind::Demux,
                 MemoryDomain::Host,
                 true,
                 NodeStatus::Implemented,
                 "streaming MPEG-TS demux".to_owned(),
-            ),
+            ));
+        }
+        nodes.extend([
             node(
                 &video_decode,
                 NodeKind::VideoDecoder,
@@ -277,38 +278,65 @@ pub fn compile(config: &PipelineConfig) -> Result<ExecutionPlan, CompileError> {
                 MemoryDomain::Host,
                 true,
                 NodeStatus::AdapterReady,
-                "AAC-LC to interleaved f32 PCM".to_owned(),
+                if rtsp {
+                    "AAC-LC or G.711 to 48 kHz stereo f32 PCM".to_owned()
+                } else {
+                    "AAC-LC to interleaved f32 PCM".to_owned()
+                },
             ),
         ]);
-        edges.extend([
-            edge(
-                &source,
-                &demux,
-                MediaType::MpegTs,
-                MemoryDomain::Host,
-                ClockDomain::Source,
-                capacities.transport_messages,
-                FullPolicy::Backpressure,
-            ),
-            edge(
-                &demux,
-                &video_decode,
-                MediaType::H264AccessUnit,
-                MemoryDomain::Host,
-                ClockDomain::Source,
-                capacities.video_frames,
-                FullPolicy::Backpressure,
-            ),
-            edge(
-                &demux,
-                &audio_decode,
-                MediaType::AacAdts,
-                MemoryDomain::Host,
-                ClockDomain::Source,
-                capacities.audio_blocks,
-                FullPolicy::Backpressure,
-            ),
-        ]);
+        if rtsp {
+            edges.extend([
+                edge(
+                    &source,
+                    &video_decode,
+                    MediaType::H264AccessUnit,
+                    MemoryDomain::Host,
+                    ClockDomain::Source,
+                    capacities.video_frames,
+                    FullPolicy::Backpressure,
+                ),
+                edge(
+                    &source,
+                    &audio_decode,
+                    MediaType::CompressedAudio,
+                    MemoryDomain::Host,
+                    ClockDomain::Source,
+                    capacities.audio_blocks,
+                    FullPolicy::Backpressure,
+                ),
+            ]);
+        } else {
+            edges.extend([
+                edge(
+                    &source,
+                    &demux,
+                    MediaType::MpegTs,
+                    MemoryDomain::Host,
+                    ClockDomain::Source,
+                    capacities.transport_messages,
+                    FullPolicy::Backpressure,
+                ),
+                edge(
+                    &demux,
+                    &video_decode,
+                    MediaType::H264AccessUnit,
+                    MemoryDomain::Host,
+                    ClockDomain::Source,
+                    capacities.video_frames,
+                    FullPolicy::Backpressure,
+                ),
+                edge(
+                    &demux,
+                    &audio_decode,
+                    MediaType::AacAdts,
+                    MemoryDomain::Host,
+                    ClockDomain::Source,
+                    capacities.audio_blocks,
+                    FullPolicy::Backpressure,
+                ),
+            ]);
+        }
     }
 
     nodes.extend([
@@ -644,10 +672,20 @@ mod tests {
     }
 
     #[test]
-    fn reports_rtsp_schema_as_valid_but_runtime_integration_pending() {
+    fn compiles_rtsp_into_direct_depacketized_codec_edges() {
         let config = PipelineConfig::from_yaml(include_str!("../../../examples/rtsp.yaml"))
-            .expect("RTSP contract should parse before the adapter exists");
-        let error = compile(&config).expect_err("RTSP graph must not masquerade as SRT");
-        assert!(matches!(error, CompileError::RtspAdapterPending { .. }));
+            .expect("RTSP contract should parse");
+        let plan = compile(&config).expect("RTSP graph should compile");
+        assert!(plan.edge("input.0", "demux.0").is_none());
+        assert_eq!(
+            plan.edge("input.0", "video.decode.0")
+                .map(|edge| edge.contract.media),
+            Some(MediaType::H264AccessUnit)
+        );
+        assert_eq!(
+            plan.edge("input.0", "audio.decode.0")
+                .map(|edge| edge.contract.media),
+            Some(MediaType::CompressedAudio)
+        );
     }
 }

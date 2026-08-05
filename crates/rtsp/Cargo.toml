@@ -10,6 +10,7 @@ repository.workspace = true
 
 [dependencies]
 aimedia-core = { version = "0.2.0-alpha.1", path = "../core" }
+async-trait.workspace = true
 bytes.workspace = true
 futures-util.workspace = true
 retina.workspace = true

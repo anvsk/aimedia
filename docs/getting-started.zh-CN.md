@@ -7,12 +7,11 @@
 ## 1. 先理解当前作业
 
 ```text
-SRT/MPEG-TS 输入
-        |
-        v
-拆分音视频 -> 解码 -> 独立节目时间线 -> 编码 -> MPEG-TS/SRT 输出
-                         |
-                         `-> 非阻塞 AI Tap（后续）
+SRT/MPEG-TS -> TS 拆包 ------\
+                              -> 压缩音视频包 -> 解码 -> 独立节目时间线
+RTSP/RTP ----> RTP 拆包 ------/                         |
+                                                        v
+                                       编码 -> MPEG-TS -> SRT 输出
 ```
 
 v0.2 固定 H.264 8-bit 4:2:0、最高 1080p30、AAC-LC 48kHz 双声道。固定支持范围不是
@@ -34,11 +33,11 @@ v0.2 固定 H.264 8-bit 4:2:0、最高 1080p30、AAC-LC 48kHz 双声道。固定
 配置先归一化为内部作业，再由图编译器生成唯一的 `ExecutionPlan`。因此旧格式转换和
 新格式运行不会形成两套 socket、codec 或 GPU 管线。
 
-v0.3 已冻结 RTSP 输入契约，并实现了 `crates/rtsp` 会话边界：TCP/UDP
-意图、Basic/Digest 鉴权、SDP 轨道选择、H.264/H.265/AAC-LC/G.711 类型化事件、
-超时和密钥隐藏已落地。当前 `explain` 会明确返回
-`runtime graph integration is pending V3-02C`；在接入真实编解码管线前仍只是
-`foundation`，不宣称可以运行 RTSP 节目。
+v0.3 已把 RTSP TCP interleaved 接入单路运行时。会话边界负责鉴权、SDP 轨道选择和
+RTP 拆包，产出的 H.264/AAC-LC/G.711 压缩帧直接进入统一 codec 队列，不会先伪装成
+MPEG-TS 再拆一次。G.711 摄像机音频会从 8kHz 单声道桥接为输出需要的 48kHz 双声道。
+当前状态仍是 `experimental`：UDP、H.265 bridge、非 48kHz 双声道 AAC、外部摄像机
+兼容和长稳分别由后续 V3-02D 至 V3-02F 完成。
 
 ## 2. 在 CPU 环境查看执行计划
 
@@ -47,6 +46,7 @@ v0.3 已冻结 RTSP 输入契约，并实现了 `crates/rtsp` 会话边界：TCP
 ```bash
 cargo run -p aimedia -- explain -f examples/single-srt.yaml
 cargo run -p aimedia -- explain -f examples/single-srt.yaml --json
+cargo run -p aimedia -- explain -f examples/rtsp.yaml
 ```
 
 输出包含：
@@ -112,6 +112,20 @@ docker run --rm --gpus all \
 完成断流恢复、FFmpeg/OBS/VLC 互操作、网络损伤和两小时稳定性测试，在固定支持范围内
 标记为 supported。精确环境与数字见
 [v0.2 性能报告](reports/v0.2-native-live-pipe.md)。
+
+RTSP 摄像机使用 `examples/rtsp.yaml` 作为起点，把地址、用户名和密码引用改成真实值；
+密码只能来自环境变量或挂载文件。当前输入固定 `transport: tcp`，输出仍是 SRT：
+
+```bash
+docker run --rm --gpus all \
+  -e NVIDIA_DRIVER_CAPABILITIES=compute,utility,video \
+  -e AIMEDIA_CAMERA_PASSWORD \
+  -v "$PWD/examples:/work:ro" \
+  aimedia:gpu run -f /work/rtsp.yaml
+```
+
+这是已接通的数据面，不等于已完成市面摄像机兼容认证；正式使用前先以自己的设备做
+短时验证，并查看 `control state --json` 中的 `rtsp`、codec 和队列字段。
 
 ## 5. 可选导播示例
 
