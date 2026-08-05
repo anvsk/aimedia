@@ -89,8 +89,8 @@ docker run --rm --gpus all \
 ```
 
 启动前要先准备与配置 caller/listener 方向匹配的 SRT 发送端和接收端。真实数据面已
-完成断流恢复、FFmpeg/OBS/VLC 互操作、网络损伤和两小时稳定性测试；在 v0.2 Release
-创建前仍标记为 experimental。精确环境与数字见
+完成断流恢复、FFmpeg/OBS/VLC 互操作、网络损伤和两小时稳定性测试，在固定支持范围内
+标记为 supported。精确环境与数字见
 [v0.2 性能报告](reports/v0.2-native-live-pipe.md)。
 
 ## 5. 可选导播示例

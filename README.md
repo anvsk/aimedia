@@ -25,7 +25,7 @@
 
 ## 当前状态
 
-当前版本是 `0.1.0-alpha.1` foundation，已经实现：
+当前版本是 `0.2.0-alpha.1` Native Live Pipe，已经实现：
 
 - `aimedia-graph`：把现有配置编译为类型化、有界的执行计划；
 - 流式 MPEG-TS demux/mux、PSI/PES、PTS 回绕、PAT/PMT/PCR；
@@ -45,8 +45,8 @@
 - 通用 `MediaJob` v2 配置、多输出和 Analyzer Tap 数据面。
 
 单路 SRT 原生 GPU 数据面已通过 FFmpeg/OBS/VLC 互操作、网络损伤、断流恢复和
-[1080p30 两小时门禁](docs/reports/v0.2-native-live-pipe.md)。在 v0.2 Release 创建前仍
-标记为 `experimental`；实时能力以[支持矩阵](docs/support-matrix.md)为准。
+[1080p30 两小时门禁](docs/reports/v0.2-native-live-pipe.md)，在固定支持范围内标记为
+`supported`。实时能力以[支持矩阵](docs/support-matrix.md)为准。
 
 ## 快速体验
 
@@ -104,6 +104,7 @@ crates/
 - [设计取舍](docs/design-rationale.md)
 - [市场支持策略](docs/market-support.md)
 - [支持矩阵](docs/support-matrix.md)
+- [v0.2 Release Notes](docs/releases/v0.2.md)
 
 ## 许可证
 

@@ -19,7 +19,7 @@ shell, and supervisor glue in live services while exposing a non-blocking path f
 
 ## Current status
 
-The `0.1.0-alpha.1` foundation includes a typed graph compiler, streaming MPEG-TS demux/mux,
+The `0.2.0-alpha.1` Native Live Pipe release includes a typed graph compiler, streaming MPEG-TS demux/mux,
 runtime-loaded libsrt and libxaac adapters, a bounded single-input scheduler, program clocks,
 NVIDIA capability boundaries, deterministic switching policy, audio DSP, replay, benchmarks, and
 fuzz targets.
@@ -29,8 +29,8 @@ the last healthy frame with silent audio; SRT recovery resets the affected timel
 recovery drops stale packets, emits fresh PAT/PMT, and requests an IDR. Runtime state now reports
 every execution-plan edge, codec counters, NVDEC surface leases, and live input/output SRT stats.
 The native single-SRT GPU data plane has passed FFmpeg/OBS/VLC interoperability, network
-impairment, disconnect recovery, and a 1080p30 two-hour soak. It remains experimental until the
-v0.2 release is published. See the Chinese performance report and support matrix for exact scope.
+impairment, disconnect recovery, and a 1080p30 two-hour soak. The fixed single-SRT scope is now
+supported; see the Chinese performance report and support matrix for exact boundaries.
 
 ```bash
 cargo run -p aimedia -- explain -f examples/single-srt.yaml
@@ -50,7 +50,8 @@ published Cargo package names retain the collision-resistant `aimedia-*` prefix.
 
 Read the [architecture RFC](docs/rfcs/0001-intent-media-runtime.md),
 [roadmap](docs/roadmap.md), [user stories](docs/user-stories.md), and
-[support matrix](docs/support-matrix.md).
+[support matrix](docs/support-matrix.md). The verified scope and raw soak evidence are listed in
+the [v0.2 release notes](docs/releases/v0.2.md).
 
 The core is Apache-2.0. External transport, codec, model, and NVIDIA components retain their own
 licenses. Open-source licensing does not grant codec patent rights.
