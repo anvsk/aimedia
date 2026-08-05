@@ -53,6 +53,7 @@ Workspace directories use concise contextual names (`core`, `graph`, `runtime`, 
 published Cargo package names retain the collision-resistant `aimedia-*` prefix.
 
 Read the [architecture RFC](docs/rfcs/0001-intent-media-runtime.md),
+[RTSP input RFC](docs/rfcs/0002-rtsp-input.md),
 [roadmap](docs/roadmap.md), [user stories](docs/user-stories.md), and
 [support matrix](docs/support-matrix.md). The verified scope and raw soak evidence are listed in
 the [v0.2 release notes](docs/releases/v0.2.md).
