@@ -3,6 +3,10 @@
 //! Decoder/encoder frame submission is intentionally kept behind this crate. CPU-only builds do
 //! not link NVIDIA libraries; availability is checked at runtime.
 
+mod decoder;
+
+pub use decoder::{NvdecConfig, NvdecDecoder, NvdecFormat, NvdecSurfaceLease};
+
 use std::{
     sync::Arc,
     sync::atomic::{AtomicBool, Ordering},
@@ -20,9 +24,12 @@ const REQUIRED_NVENC_API_VERSION_RAW: u32 = (VIDEO_CODEC_SDK_MAJOR << 4) | VIDEO
 #[cfg(feature = "video-codec-sdk")]
 #[allow(
     clippy::all,
+    dead_code,
     non_camel_case_types,
     non_snake_case,
     non_upper_case_globals,
+    unnecessary_transmutes,
+    unused_imports,
     unsafe_op_in_unsafe_fn
 )]
 mod sdk_ffi {
@@ -34,6 +41,7 @@ mod sdk_ffi {
 pub struct SdkBuildManifest {
     pub bindings_enabled: bool,
     pub version: Option<&'static str>,
+    pub header_provider: Option<&'static str>,
     pub header_fingerprint_sha256: Option<&'static str>,
 }
 
@@ -45,6 +53,7 @@ impl SdkBuildManifest {
             Self {
                 bindings_enabled: true,
                 version: Some(env!("AIMEDIA_VIDEO_CODEC_SDK_VERSION")),
+                header_provider: Some(env!("AIMEDIA_VIDEO_CODEC_HEADER_PROVIDER")),
                 header_fingerprint_sha256: Some(env!("AIMEDIA_VIDEO_CODEC_SDK_FINGERPRINT")),
             }
         }
@@ -53,6 +62,7 @@ impl SdkBuildManifest {
             Self {
                 bindings_enabled: false,
                 version: None,
+                header_provider: None,
                 header_fingerprint_sha256: None,
             }
         }
@@ -266,6 +276,10 @@ impl CudaSurfaceLease {
 impl SurfaceLease for CudaSurfaceLease {
     fn handle(&self) -> u64 {
         self.handle
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
 }
 

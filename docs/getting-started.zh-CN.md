@@ -45,7 +45,8 @@ cargo run -p aimedia -- run -f examples/single-srt.yaml --dry-run
 ## 3. 检查 Linux GPU 环境
 
 生产目标环境是 Linux x86_64、Docker、NVIDIA GPU、兼容驱动和 NVIDIA Container
-Toolkit。Video Codec SDK 13.0 只在构建 GPU 后端时需要。
+Toolkit。GPU 后端构建需要 Video Codec SDK 13.0 ABI headers；参考镜像默认使用固定的
+MIT 许可 headers，也支持用户提供 NVIDIA 官方 SDK。
 
 ```bash
 docker run --rm --gpus all \
@@ -103,10 +104,15 @@ cargo run -p aimedia -- bench -f examples/director.yaml \
 从 URI 删除 `passphrase`、`password`、`token` 或 `secret`，改用 `secretRef.env` 或
 `secretRef.file`。
 
-### 找不到 NVIDIA SDK
+### 找不到 NVIDIA SDK 或 NVDEC 驱动库
 
-图编译器、CPU 测试和 fake backend 不需要 SDK。只有启用 NVIDIA codec feature 时才
-需要按构建说明提供 SDK 13.0；SDK 压缩包和头文件不会提交到仓库。
+图编译器、CPU 测试和 fake backend 不需要 SDK。启用 NVIDIA codec feature 时，按
+[GPU 镜像说明](../docker/README.md)选择固定的 `nv-codec-headers`，或通过 named context
+传入官方 SDK 13.0；两类头文件都不会提交到仓库或复制进运行镜像。
+
+容器运行参数还必须包含
+`NVIDIA_DRIVER_CAPABILITIES=compute,utility,video`。缺少 `video` 时，即使
+`nvidia-smi` 正常，容器中仍可能没有 NVDEC/NVENC 驱动库。
 
 ### Windows workspace 检查失败
 

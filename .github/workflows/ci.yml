@@ -31,3 +31,21 @@ jobs:
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
           command: check
+
+  nvidia-abi:
+    runs-on: ubuntu-24.04
+    env:
+      AIMEDIA_NVCODEC_HEADERS_PATH: ${{ github.workspace }}/.ci/nvcodec
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: FFmpeg/nv-codec-headers
+          ref: e844e5b26f46bb77479f063029595293aa8f812d
+          path: .ci/nvcodec
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --locked -p aimedia-nvidia --features video-codec-sdk
+      - run: cargo clippy --locked -p aimedia-nvidia --all-targets --features video-codec-sdk -- -D warnings

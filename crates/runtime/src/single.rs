@@ -683,6 +683,10 @@ mod tests {
         fn handle(&self) -> u64 {
             self.0
         }
+
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
     }
 
     #[derive(Debug, Default)]
