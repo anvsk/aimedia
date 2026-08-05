@@ -103,7 +103,8 @@
   单调，RSS/GPU 内存不持续增长，运行镜像无 FFmpeg/libav；修复输入 caller 已积压时
   延迟 output listener 连接导致的 `cuvidMapVideoFrame64` 205，并加入 surface 生命周期
   与延迟接收端回归。
-  进度：本 PR 将实时视频时间线改为容量 1 的 `keepLatest` slot；同一 4 秒积压场景中，
+  进度：PR [#18](https://github.com/anvsk/aimedia/pull/18) 将实时视频时间线改为容量 1
+  的 `keepLatest` slot；同一 4 秒积压场景中，
   旧 `main` 镜像稳定返回 NVDEC 205，修复镜像三端退出码均为 0，替换 143 个过期帧，
   surface 高水位 4/4，输出首包 IDR 且 PTS/DTS 单调。两小时 soak、延迟和内存趋势
   尚未完成，因此本项保持未勾选。

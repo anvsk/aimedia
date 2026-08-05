@@ -95,7 +95,8 @@ output listener 的接收端。合并 PR #17 时的 `main` 镜像稳定失败：
 NVIDIA operation cuvidMapVideoFrame64 failed with code 205
 ```
 
-修复版将解码视频到节目时间线改为容量 1 的 `keepLatest` slot。过期视频 surface 在
+PR [#18](https://github.com/anvsk/aimedia/pull/18) 将解码视频到节目时间线改为容量 1
+的 `keepLatest` slot。过期视频 surface 在
 下一次突发解码前释放，压缩包和音频队列仍保持有界 backpressure。相同脚本结果：
 
 - 旧镜像退出码 1，修复镜像的发送端、接收端和 aimedia 退出码均为 0；
