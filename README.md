@@ -33,17 +33,17 @@
 - libxaac AAC-LC 帧级 adapter、1024-sample 时间线和 native round-trip；
 - 独立节目时钟、固定容量单路调度器、fake transport/codec 验证；
 - NVIDIA SDK 探测、实验性 NVDEC/NVENC 帧后端、GPU 内 NV12 复制与代际 surface lease、
-  本机控制协议；
+  单路生产后端装配和本机控制协议；
 - 双输入确定性导播、音频 DSP、VLM contract、replay、bench 和 fuzz。
 
 尚未完成，也不会伪装为已经完成：
 
-- 生产 SRT、codec 与调度器的完整接线；
 - 断流期间最后一帧和静音保活；
-- 真实单路 GPU 持续输出、互操作和两小时 soak；
+- OBS/VLC 等更广互操作、网络损伤测试和两小时 soak；
 - 通用 `MediaJob` v2 配置、多输出和 Analyzer Tap 数据面。
 
-因此当前 `aimedia run` 默认仍会返回明确的 pending 错误；实时能力以
+开发分支的 `aimedia run` 已能执行单路 SRT 原生 GPU 数据面，但在故障恢复、兼容覆盖
+和长稳门槛完成前仍只标记为 `experimental`。实时能力以
 [支持矩阵](docs/support-matrix.md)为准。
 
 ## 快速体验

@@ -259,7 +259,7 @@ pub fn compile(config: &PipelineConfig) -> Result<ExecutionPlan, CompileError> {
                 NodeKind::VideoDecoder,
                 MemoryDomain::NvidiaDevice,
                 true,
-                NodeStatus::Pending,
+                NodeStatus::AdapterReady,
                 "NVDEC H.264 to leased NV12 surface".to_owned(),
             ),
             node(
@@ -324,7 +324,7 @@ pub fn compile(config: &PipelineConfig) -> Result<ExecutionPlan, CompileError> {
             NodeKind::VideoEncoder,
             MemoryDomain::NvidiaDevice,
             true,
-            NodeStatus::Pending,
+            NodeStatus::AdapterReady,
             "NVENC H.264 with IDR control".to_owned(),
         ),
         node(

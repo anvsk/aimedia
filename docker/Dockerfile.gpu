@@ -7,7 +7,10 @@ RUN apt-get update \
     && git -C /src/nv-codec-headers remote add origin https://github.com/FFmpeg/nv-codec-headers.git \
     && git -C /src/nv-codec-headers fetch --depth 1 origin "${NVCODEC_HEADERS_REF}" \
     && git -C /src/nv-codec-headers checkout --detach FETCH_HEAD \
-    && test "$(git -C /src/nv-codec-headers rev-parse HEAD)" = "${NVCODEC_HEADERS_REF}"
+    && test "$(git -C /src/nv-codec-headers rev-parse HEAD)" = "${NVCODEC_HEADERS_REF}" \
+    && sed -n '1,/^ \*\//p' \
+       /src/nv-codec-headers/include/ffnvcodec/nvEncodeAPI.h \
+       > /src/nv-codec-headers/LICENSE
 
 FROM rust:1.88-bookworm AS rust-builder
 WORKDIR /src

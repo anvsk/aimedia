@@ -71,8 +71,11 @@
   RTX 5060 Laptop + 577.12 驱动通过 NVDEC NV12 显存帧到持久 NVENC surface 的 GPU
   内复制、首次及显式强制 IDR、Annex-B/SPS/PPS 输出、EOS flush，并将编码结果重新交给
   新 NVDEC 实例成功解码。生产运行时接线与长稳仍属于 V2-05 以后。
-- [ ] **V2-05 生产后端装配**：把 libsrt、MPEG-TS、NVDEC/NVENC 和 libxaac 注入单路
+- [x] **V2-05 生产后端装配**：把 libsrt、MPEG-TS、NVDEC/NVENC 和 libxaac 注入单路
   调度器；`aimedia run` 不再返回 `nativeVideoBackendPending`。
+  证据：Linux workspace 32 tests 和严格 Clippy 全绿；RTX 5060 Laptop + 577.12 驱动
+  完成 15 秒 FFmpeg SRT 输入、原生解码/重编码、SRT 输出和 ffprobe 验证，447 个视频包
+  与 694 个音频包 PTS/DTS 无倒退，视频 PTS=DTS；运行镜像无 FFmpeg/libav。
 - [ ] **V2-06 断流与输出恢复**：输入断线输出最后健康帧和静音，恢复后等待 IDR；输出
   断线不积压历史包，重连后重新发送 PAT/PMT 并请求 IDR。
 - [ ] **V2-07 计划与运行状态一致性**：状态报告每条计划边的容量/水位、codec 帧数、
