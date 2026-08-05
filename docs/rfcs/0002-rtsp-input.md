@@ -147,4 +147,3 @@ payload 损坏必须使用稳定阶段码。可恢复的网络/会话错误只�
 4. UDP RTP/RTCP、重排和超时恢复。
 5. H.265 depacketizer 边界与 V3-04 handoff。
 6. 外部设备、网络损伤、两小时 soak 和支持矩阵升级。
-
