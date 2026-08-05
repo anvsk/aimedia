@@ -4,8 +4,10 @@
 //! not link NVIDIA libraries; availability is checked at runtime.
 
 mod decoder;
+mod encoder;
 
 pub use decoder::{NvdecConfig, NvdecDecoder, NvdecFormat, NvdecSurfaceLease};
+pub use encoder::{NvencConfig, NvencEncoder};
 
 use std::{
     sync::Arc,

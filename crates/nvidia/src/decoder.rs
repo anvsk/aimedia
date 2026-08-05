@@ -179,9 +179,11 @@ mod native {
     const CLOCK_RATE: u32 = 90_000;
 
     type CuDeviceGet = unsafe extern "C" fn(*mut sdk_ffi::CUdevice, i32) -> sdk_ffi::CUresult;
-    type CuCtxCreate =
-        unsafe extern "C" fn(*mut sdk_ffi::CUcontext, u32, sdk_ffi::CUdevice) -> sdk_ffi::CUresult;
-    type CuCtxDestroy = unsafe extern "C" fn(sdk_ffi::CUcontext) -> sdk_ffi::CUresult;
+    type CuDevicePrimaryCtxRetain =
+        unsafe extern "C" fn(*mut sdk_ffi::CUcontext, sdk_ffi::CUdevice) -> sdk_ffi::CUresult;
+    type CuDevicePrimaryCtxRelease = unsafe extern "C" fn(sdk_ffi::CUdevice) -> sdk_ffi::CUresult;
+    type CuCtxPushCurrent = unsafe extern "C" fn(sdk_ffi::CUcontext) -> sdk_ffi::CUresult;
+    type CuCtxPopCurrent = unsafe extern "C" fn(*mut sdk_ffi::CUcontext) -> sdk_ffi::CUresult;
     type CuvidGetDecoderCaps =
         unsafe extern "C" fn(*mut sdk_ffi::CUVIDDECODECAPS) -> sdk_ffi::CUresult;
     type CuvidCreateDecoder = unsafe extern "C" fn(
@@ -215,8 +217,10 @@ mod native {
     #[derive(Clone, Copy)]
     struct CudaFunctions {
         device_get: CuDeviceGet,
-        context_create: CuCtxCreate,
-        context_destroy: CuCtxDestroy,
+        primary_context_retain: CuDevicePrimaryCtxRetain,
+        primary_context_release: CuDevicePrimaryCtxRelease,
+        context_push: CuCtxPushCurrent,
+        context_pop: CuCtxPopCurrent,
     }
 
     #[derive(Clone, Copy)]
@@ -385,6 +389,7 @@ mod native {
         _libraries: std::sync::Arc<NvidiaLibraries>,
         cuda: CudaFunctions,
         nvdec: NvdecFunctions,
+        device: sdk_ffi::CUdevice,
         context: sdk_ffi::CUcontext,
         config: NvdecConfig,
         releases: Sender<Release>,
@@ -438,14 +443,26 @@ mod native {
                 )
             })?;
             let mut context = ptr::null_mut();
+            // Decoder and encoder workers retain the same per-device primary context. CUDA device
+            // pointers are context-scoped, so this shared address space is required for the
+            // GPU-to-GPU NVDEC -> NVENC copy.
             // SAFETY: device was returned by the CUDA driver and output points to a context slot.
-            check_cuda("cuCtxCreate_v2", unsafe {
-                (cuda.context_create)(&mut context, sdk_ffi::CU_CTX_SCHED_BLOCKING_SYNC, device)
+            check_cuda("cuDevicePrimaryCtxRetain", unsafe {
+                (cuda.primary_context_retain)(&mut context, device)
             })?;
+            // SAFETY: the retained context is live and this worker owns its thread context stack.
+            if let Err(error) = check_cuda("cuCtxPushCurrent_v2", unsafe {
+                (cuda.context_push)(context)
+            }) {
+                // SAFETY: retain above succeeded and no CUDA resources were created.
+                let _ = unsafe { (cuda.primary_context_release)(device) };
+                return Err(error);
+            }
             let mut worker = Self {
                 _libraries: libraries,
                 cuda,
                 nvdec,
+                device,
                 context,
                 config,
                 releases,
@@ -455,9 +472,7 @@ mod native {
                 next_generation: 1,
             };
             if let Err(error) = worker.start_generation() {
-                // SAFETY: the context was created above and no decoder resources escaped.
-                let _ = unsafe { (worker.cuda.context_destroy)(worker.context) };
-                worker.context = ptr::null_mut();
+                worker.release_context();
                 return Err(error);
             }
             Ok(worker)
@@ -726,13 +741,29 @@ mod native {
                     );
                 }
             }
-            if !self.context.is_null() {
-                // SAFETY: all decoder/parser resources owned by the worker were released first.
-                let result = unsafe { (self.cuda.context_destroy)(self.context) };
-                if result != 0 {
-                    tracing::error!(code = result, "cuCtxDestroy_v2 failed");
-                }
+            self.release_context();
+        }
+    }
+
+    impl Worker {
+        fn release_context(&mut self) {
+            if self.context.is_null() {
+                return;
             }
+            let mut popped = ptr::null_mut();
+            // SAFETY: this worker pushed the retained primary context and owns this thread stack.
+            let result = unsafe { (self.cuda.context_pop)(&mut popped) };
+            if result != 0 {
+                tracing::error!(code = result, "cuCtxPopCurrent_v2 failed");
+            } else if popped != self.context {
+                tracing::error!("CUDA context stack returned an unexpected context");
+            }
+            // SAFETY: all decoder/parser resources have been released and retain succeeded.
+            let result = unsafe { (self.cuda.primary_context_release)(self.device) };
+            if result != 0 {
+                tracing::error!(code = result, "cuDevicePrimaryCtxRelease_v2 failed");
+            }
+            self.context = ptr::null_mut();
         }
     }
 
@@ -1016,15 +1047,25 @@ mod native {
         unsafe {
             Ok(CudaFunctions {
                 device_get: load_symbol(&libraries._cuda, b"cuDeviceGet\0", "cuDeviceGet")?,
-                context_create: load_symbol(
+                primary_context_retain: load_symbol(
                     &libraries._cuda,
-                    b"cuCtxCreate_v2\0",
-                    "cuCtxCreate_v2",
+                    b"cuDevicePrimaryCtxRetain\0",
+                    "cuDevicePrimaryCtxRetain",
                 )?,
-                context_destroy: load_symbol(
+                primary_context_release: load_symbol(
                     &libraries._cuda,
-                    b"cuCtxDestroy_v2\0",
-                    "cuCtxDestroy_v2",
+                    b"cuDevicePrimaryCtxRelease_v2\0",
+                    "cuDevicePrimaryCtxRelease_v2",
+                )?,
+                context_push: load_symbol(
+                    &libraries._cuda,
+                    b"cuCtxPushCurrent_v2\0",
+                    "cuCtxPushCurrent_v2",
+                )?,
+                context_pop: load_symbol(
+                    &libraries._cuda,
+                    b"cuCtxPopCurrent_v2\0",
+                    "cuCtxPopCurrent_v2",
                 )?,
             })
         }
