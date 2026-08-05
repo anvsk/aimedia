@@ -55,8 +55,10 @@
 - [x] **V2-01 架构与目录重置**：短目录、`aimedia-graph`、新产品定位和 RFC。
   证据：PR [#10](https://github.com/anvsk/aimedia/pull/10)，Linux tests、Clippy、Docker
   build/smoke 和 GitHub CI 全绿。
-- [ ] **V2-02 执行计划接管运行时**：`SinglePipeline` 保存编译后的 `ExecutionPlan`，
-  从计划读取队列与资源约束；配置、`explain` 和运行时不得各维护一套拓扑。
+- [x] **V2-02 执行计划接管运行时**：`SinglePipeline` 保存编译后的 `ExecutionPlan`，
+  从计划读取队列与资源约束；配置、`explain` 和运行时不再各维护一套拓扑。
+  证据：PR [#11](https://github.com/anvsk/aimedia/pull/11)，计划/运行时差分测试、Linux
+  workspace、严格 Clippy、依赖许可证和 Docker build/smoke 全绿。
 - [ ] **V2-03 NVDEC 帧级后端**：H.264 access unit 输入、格式回调、leased NV12 surface、
   discontinuity reset、IDR 重新同步和 GPU 错误映射。
 - [ ] **V2-04 NVENC 帧级后端**：持久输入 surface、H.264 Main/CBR/无 B 帧/1 秒 GOP、
