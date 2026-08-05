@@ -154,10 +154,15 @@ v0.3 工程。只有 V2-11 也完成后，总览才把 v0.2 标记为完全完�
       证据：PR [#29](https://github.com/anvsk/aimedia/pull/29)，本机伪摄像机两次
       `DESCRIBE/SETUP/PLAY` 闭环和断线恢复状态通过；Linux workspace 44 项测试、
       严格 Clippy、cargo-deny 和 release Docker 构建通过。
-    - [ ] V3-02D2：UDP RTP/RTCP 和固定重排窗口。已确认固定的 Retina 0.4.19
-      会在公开 `PacketItem` 之前丢弃乱序 UDP 包，因此不允许只开启上游 UDP 开关就
-      宣称完成；该切片需在库内实现重排或对上游做可审查的最小补丁。
-  - [ ] V3-02E：H.265 RTP 重组、明确 bridge pending 与 V3-04 handoff。
+    - [x] V3-02D2 产品取舍：UDP RTP/RTCP 与重排不再阻塞 v0.3。固定的
+      Retina 0.4.19 会在公开 `PacketItem` 前丢弃乱序 UDP 包；上游 issue #40 仍未完成，
+      已有原型对视频的假设不成立且无重传时延迟收益低。当前继续明确拒绝 UDP，
+      有真实用户要求或上游成熟方案后再恢复，不为了勾选而维护长期 fork。
+  - [x] V3-02E：H.265 RTP 重组、明确 bridge pending 与 V3-04 handoff。
+    证据：PR [#30](https://github.com/anvsk/aimedia/pull/30)，两个 RFC 7798 FU RTP 包重组为
+    单个 Annex-B IDR access unit 并以 `CodecId::H265` 交给公共媒体边界；native GPU
+    运行前仍返回稳定 `videoBridgePending`，Linux workspace 45 项测试与严格 Clippy
+    通过。
   - [ ] V3-02F：外部设备、网络损伤、两小时 soak 和支持矩阵升级。
 - [ ] **V3-03 RTMP/RTMPS 与 FLV**：输入、输出、FLV demux/mux。
 - [ ] **V3-04 HEVC Bridge**：H.265 输入转 H.264 输出。
