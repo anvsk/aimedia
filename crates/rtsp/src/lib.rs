@@ -754,14 +754,7 @@ impl RtspPacketSource {
                     self.stats.record(frame.packet_loss);
                     let codec = match frame.codec {
                         RtspCodec::H264 => CodecId::H264,
-                        RtspCodec::H265 => {
-                            return Err(RtspError::new(
-                                RtspErrorCode::NoSupportedTracks,
-                                RtspErrorStage::Receive,
-                                false,
-                                "H.265 was negotiated, but the v0.3 native runtime accepts H.264 video only",
-                            ));
-                        }
+                        RtspCodec::H265 => CodecId::H265,
                         RtspCodec::AacLc | RtspCodec::G711Alaw | RtspCodec::G711Mulaw => {
                             unreachable!("video events cannot carry an audio codec")
                         }
@@ -1253,6 +1246,12 @@ mod tests {
         TrackDescriptor, TrackKind, select_primary_tracks,
     };
 
+    #[derive(Clone, Copy)]
+    enum MockVideo {
+        H264,
+        H265,
+    }
+
     fn config() -> RtspConfig {
         RtspConfig {
             transport: RtspTransport::Tcp,
@@ -1479,6 +1478,54 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn h265_rtp_is_depacketized_for_the_v3_04_bridge() {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("mock H.265 camera should bind");
+        let address = listener.local_addr().expect("mock camera has an address");
+        let server = tokio::spawn(async move {
+            let (socket, _) = listener.accept().await?;
+            serve_mock_camera_profile(socket, address.port(), MockVideo::H265, false).await
+        });
+
+        let endpoint = RtspEndpoint::from_config(&format!("rtsp://{address}/live"), &config())
+            .expect("loopback endpoint should be valid");
+        let mut source = RtspPacketSource::connect(endpoint)
+            .await
+            .expect("mock H.265 RTSP session should connect");
+        assert_eq!(source.profile().video.codec, Some(RtspCodec::H265));
+        assert_eq!(
+            source
+                .profile()
+                .audio
+                .as_ref()
+                .and_then(|track| track.codec),
+            Some(RtspCodec::G711Alaw)
+        );
+
+        let packet = source
+            .receive_packet()
+            .await
+            .expect("H.265 RTP should become a typed access unit");
+        assert_eq!(packet.codec, CodecId::H265);
+        assert!(packet.keyframe);
+        assert!(packet.data.starts_with(&[0, 0, 0, 1]));
+        assert!(
+            packet
+                .data
+                .windows(5)
+                .any(|window| window == [0x26, 0x01, 0x9a, 0x10, 0x20]),
+            "the two H.265 FU packets should be reconstructed into one IDR NAL"
+        );
+
+        source.close().await.expect("H.265 session should close");
+        server
+            .await
+            .expect("mock H.265 camera task should not panic")
+            .expect("mock H.265 camera should complete without I/O errors");
+    }
+
+    #[tokio::test]
     async fn g711_bridge_emits_bounded_1024_sample_48khz_stereo_blocks() {
         for (rtsp_codec, packet_codec, silence) in [
             (RtspCodec::G711Alaw, CodecId::G711Alaw, 0xd5),
@@ -1518,12 +1565,21 @@ mod tests {
     }
 
     async fn serve_mock_camera(socket: TcpStream, port: u16) -> io::Result<()> {
-        serve_mock_camera_once(socket, port, false).await
+        serve_mock_camera_profile(socket, port, MockVideo::H264, false).await
     }
 
     async fn serve_mock_camera_once(
+        socket: TcpStream,
+        port: u16,
+        disconnect_after_frame: bool,
+    ) -> io::Result<()> {
+        serve_mock_camera_profile(socket, port, MockVideo::H264, disconnect_after_frame).await
+    }
+
+    async fn serve_mock_camera_profile(
         mut socket: TcpStream,
         port: u16,
+        video: MockVideo,
         disconnect_after_frame: bool,
     ) -> io::Result<()> {
         let mut pending = Vec::new();
@@ -1552,7 +1608,14 @@ mod tests {
                     .await?;
                 }
                 "DESCRIBE" => {
-                    let sdp = include_bytes!("../../../examples/fixtures/rtsp/h264-aac.sdp");
+                    let sdp: &[u8] = match video {
+                        MockVideo::H264 => {
+                            include_bytes!("../../../examples/fixtures/rtsp/h264-aac.sdp")
+                        }
+                        MockVideo::H265 => {
+                            include_bytes!("../../../examples/fixtures/rtsp/h265-pcma.sdp")
+                        }
+                    };
                     write_response(
                         &mut socket,
                         &cseq,
@@ -1587,7 +1650,7 @@ mod tests {
                         b"",
                     )
                     .await?;
-                    write_h264_idr(&mut socket).await?;
+                    write_video_idr(&mut socket, video).await?;
                     if disconnect_after_frame {
                         return Ok(());
                     }
@@ -1647,13 +1710,43 @@ mod tests {
         socket.write_all(body).await
     }
 
-    async fn write_h264_idr(socket: &mut TcpStream) -> io::Result<()> {
-        let rtp = [
-            0x80, 0xe0, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x01, 0x02, 0x03, 0x04, 0x65, 0x88,
-            0x84, 0x21,
-        ];
+    async fn write_video_idr(socket: &mut TcpStream, video: MockVideo) -> io::Result<()> {
+        match video {
+            MockVideo::H264 => {
+                write_interleaved_rtp(
+                    socket,
+                    &[
+                        0x80, 0xe0, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x01, 0x02, 0x03, 0x04,
+                        0x65, 0x88, 0x84, 0x21,
+                    ],
+                )
+                .await
+            }
+            MockVideo::H265 => {
+                // RFC 7798 fragmentation unit: IDR type 19 split across sequence 1 and 2.
+                write_interleaved_rtp(
+                    socket,
+                    &[
+                        0x80, 0x62, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x01, 0x02, 0x03, 0x04,
+                        0x62, 0x01, 0x93, 0x9a, 0x10,
+                    ],
+                )
+                .await?;
+                write_interleaved_rtp(
+                    socket,
+                    &[
+                        0x80, 0xe2, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x01, 0x02, 0x03, 0x04,
+                        0x62, 0x01, 0x53, 0x20,
+                    ],
+                )
+                .await
+            }
+        }
+    }
+
+    async fn write_interleaved_rtp(socket: &mut TcpStream, rtp: &[u8]) -> io::Result<()> {
         let mut interleaved = vec![b'$', 0, 0, rtp.len() as u8];
-        interleaved.extend_from_slice(&rtp);
+        interleaved.extend_from_slice(rtp);
         socket.write_all(&interleaved).await
     }
 }

@@ -536,7 +536,7 @@ async fn receive_packets(
                     controller.mark_input_discontinuity(0).await;
                 }
                 let (sender, queue) = match packet.codec {
-                    CodecId::H264 => (&video_sender, &video_queue),
+                    CodecId::H264 | CodecId::H265 => (&video_sender, &video_queue),
                     CodecId::AacLc | CodecId::G711Alaw | CodecId::G711Mulaw => {
                         (&audio_sender, &audio_queue)
                     }

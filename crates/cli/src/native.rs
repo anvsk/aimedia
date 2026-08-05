@@ -132,7 +132,7 @@ async fn build_backends(config: &PipelineConfig) -> Result<SinglePipelineBackend
         if source.profile().video.codec != Some(RtspCodec::H264) {
             let _ = source.close().await;
             bail!(
-                "rtspVideoUnsupported: v0.3 requires an H.264 video track; H.265 decode integration is scheduled for V3-04"
+                "videoBridgePending: H.265 RTP depacketization is available, but the NVDEC HEVC to NVENC H.264 bridge is scheduled for V3-04"
             );
         }
         let decoder = match build_rtsp_audio_decoder(

@@ -508,7 +508,7 @@ impl Controller {
     fn record_decoded(&mut self, codec: CodecId, count: usize) {
         let count = count as u64;
         match codec {
-            CodecId::H264 => {
+            CodecId::H264 | CodecId::H265 => {
                 self.input_states[0].codec.video_decoded_frames = self.input_states[0]
                     .codec
                     .video_decoded_frames
@@ -533,7 +533,7 @@ impl Controller {
 
     fn record_input_drop(&mut self, codec: CodecId) {
         match codec {
-            CodecId::H264 => {
+            CodecId::H264 | CodecId::H265 => {
                 self.input_states[0].codec.video_dropped_frames = self.input_states[0]
                     .codec
                     .video_dropped_frames
@@ -551,7 +551,7 @@ impl Controller {
 
     fn record_encoded(&mut self, codec: CodecId) {
         match codec {
-            CodecId::H264 => {
+            CodecId::H264 | CodecId::H265 => {
                 self.output_state.video_encoded_frames =
                     self.output_state.video_encoded_frames.saturating_add(1);
             }
@@ -565,7 +565,7 @@ impl Controller {
 
     fn record_output_drop(&mut self, codec: CodecId) {
         match codec {
-            CodecId::H264 => {
+            CodecId::H264 | CodecId::H265 => {
                 self.output_state.video_dropped_frames =
                     self.output_state.video_dropped_frames.saturating_add(1);
             }
