@@ -93,7 +93,8 @@
   输出断开/恢复分别报告 `connected=false/true` 且 `reconnects=1`。
 - [x] **V2-08 外部互操作**：OBS 与 FFmpeg 作为输入端，VLC、OBS、ffprobe 作为输出端；
   caller/listener、损坏 TS、1% 丢包、20ms 抖动和 40ms RTT。
-  证据：本 PR 的可重复验收脚本与 [互操作报告](reports/interop.md)。FFmpeg 8.1.2
+  证据：PR [#17](https://github.com/anvsk/aimedia/pull/17) 的可重复验收脚本与
+  [互操作报告](reports/interop.md)。FFmpeg 8.1.2
   caller/listener 四种组合、损坏 TS 和网络损伤通过；OBS 作为真实输入和实际渲染
   输出通过；VLC 3.0.20 raw dump 后由 ffprobe 验证 H.264/AAC、首包 keyframe 与
   PTS/DTS 单调。OBS 本机工具镜像的 teardown crash 与延迟 output listener 触发的
