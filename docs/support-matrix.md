@@ -11,8 +11,8 @@
 | 能力 | 状态 | 说明 |
 |---|---|---|
 | `aimedia/v1alpha1` 配置 | supported | 严格字段、范围和密钥引用校验；`DirectorPipeline` 是待迁移的 v0.1 适配层 |
-| 类型化执行图 | supported | `aimedia-graph` 输出媒体、内存、时钟、队列、资源和节点实现状态；单路执行器从计划读取队列契约 |
-| 单路/双路配置契约 | foundation | `inputs` 接受 1–2 路；单路 state、`notApplicable` 和队列/codec/GPU/SRT 指标结构已测 |
+| 类型化执行图 | supported | `aimedia-graph` 输出媒体、内存、时钟、队列、资源和节点实现状态；单路执行器从计划读取队列契约，状态以 `from`/`to` 报告每条计划边并对共享物理队列复用同一水位 |
+| 单路/双路配置契约 | foundation | `inputs` 接受 1–2 路；单路 `state` 已接入真实队列、codec 帧/丢帧、NVDEC surface 和输入/输出 SRT 重连指标；双路真实数据面仍待 v0.4 后的策略扩展 |
 | 单路有界媒体调度器 | experimental | libsrt、MPEG-TS、NVDEC/NVENC 和 libxaac 已接入 `aimedia run`；RTX 5060 Laptop 上完成输入断流保帧/静音、输入恢复和输出重连，恢复流首视频包为 IDR 且 continuity error 为 0；待更广互操作和长稳门槛 |
 | 双机位导播策略 | supported | replay/bench 可运行；属于可选策略示例，不再是核心发布前提 |
 | 人工 take/hold | foundation | 状态机、版本化 Unix Socket、CLI 和 mock runtime 已测；待接视频 tick |

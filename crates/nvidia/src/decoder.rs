@@ -158,16 +158,20 @@ mod native {
         ffi::c_void,
         panic::{AssertUnwindSafe, catch_unwind},
         ptr,
-        sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, SyncSender},
+        sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+            mpsc::{self, Receiver, RecvTimeoutError, Sender, SyncSender},
+        },
         thread,
         time::Duration,
     };
 
     use aimedia_core::{
-        Timestamp,
+        GpuSurfaceRuntimeStats, Timestamp,
         backend::{
-            BackendError, CodecId, MediaPacket, MemoryDomain, PixelFormat, VideoDecoder,
-            VideoFrame, VideoSurface,
+            BackendError, CodecId, GpuSurfaceObserver, MediaPacket, MemoryDomain, PixelFormat,
+            VideoDecoder, VideoFrame, VideoSurface,
         },
     };
     use async_trait::async_trait;
@@ -239,8 +243,45 @@ mod native {
     pub struct NvdecDecoder {
         commands: SyncSender<Command>,
         worker: Option<thread::JoinHandle<()>>,
+        surfaces: Arc<SurfaceMetrics>,
         waiting_for_idr: bool,
         reset_pending: bool,
+    }
+
+    struct SurfaceMetrics {
+        capacity: usize,
+        in_use: AtomicUsize,
+        high_watermark: AtomicUsize,
+    }
+
+    impl SurfaceMetrics {
+        fn new(capacity: usize) -> Self {
+            Self {
+                capacity,
+                in_use: AtomicUsize::new(0),
+                high_watermark: AtomicUsize::new(0),
+            }
+        }
+
+        fn acquire(&self) {
+            let in_use = self.in_use.fetch_add(1, Ordering::AcqRel) + 1;
+            self.high_watermark.fetch_max(in_use, Ordering::AcqRel);
+        }
+
+        fn release(&self) {
+            let previous = self.in_use.fetch_sub(1, Ordering::AcqRel);
+            debug_assert!(previous > 0, "NVDEC surface counter underflow");
+        }
+    }
+
+    impl GpuSurfaceObserver for SurfaceMetrics {
+        fn stats(&self) -> GpuSurfaceRuntimeStats {
+            GpuSurfaceRuntimeStats {
+                in_use: self.in_use.load(Ordering::Acquire),
+                capacity: self.capacity,
+                high_watermark: self.high_watermark.load(Ordering::Acquire),
+            }
+        }
     }
 
     impl std::fmt::Debug for NvdecDecoder {
@@ -249,6 +290,7 @@ mod native {
                 .debug_struct("NvdecDecoder")
                 .field("waitingForIdr", &self.waiting_for_idr)
                 .field("resetPending", &self.reset_pending)
+                .field("surfaces", &self.surfaces.stats())
                 .finish_non_exhaustive()
         }
     }
@@ -275,10 +317,14 @@ mod native {
             let (commands, receiver) = mpsc::sync_channel(config.command_capacity);
             let (releases, release_receiver) = mpsc::channel();
             let (ready_sender, ready_receiver) = mpsc::sync_channel(1);
+            let surfaces = Arc::new(SurfaceMetrics::new(
+                usize::try_from(config.output_surfaces).unwrap_or(usize::MAX),
+            ));
+            let worker_surfaces = Arc::clone(&surfaces);
             let worker = thread::Builder::new()
                 .name(format!("aimedia-nvdec-{}", config.device))
                 .spawn(move || {
-                    let worker = Worker::new(config, releases, release_receiver);
+                    let worker = Worker::new(config, releases, release_receiver, worker_surfaces);
                     match worker {
                         Ok(worker) => {
                             let _ = ready_sender.send(Ok(()));
@@ -298,6 +344,7 @@ mod native {
             Ok(Self {
                 commands,
                 worker: Some(worker),
+                surfaces,
                 waiting_for_idr: true,
                 reset_pending: false,
             })
@@ -377,6 +424,10 @@ mod native {
         async fn flush(&mut self) -> Result<Vec<VideoFrame>, BackendError> {
             self.request(|response| Command::Flush { response }).await
         }
+
+        fn surface_observer(&self) -> Option<Arc<dyn GpuSurfaceObserver>> {
+            Some(self.surfaces.clone())
+        }
     }
 
     impl Drop for NvdecDecoder {
@@ -392,6 +443,7 @@ mod native {
         device: sdk_ffi::CUdevice,
         context: sdk_ffi::CUcontext,
         config: NvdecConfig,
+        surfaces: Arc<SurfaceMetrics>,
         releases: Sender<Release>,
         release_receiver: Receiver<Release>,
         current: Option<Generation>,
@@ -425,6 +477,7 @@ mod native {
             config: NvdecConfig,
             releases: Sender<Release>,
             release_receiver: Receiver<Release>,
+            surfaces: Arc<SurfaceMetrics>,
         ) -> Result<Self, BackendError> {
             let libraries = NvidiaLibraries::load().map_err(nvidia_backend_error)?;
             let cuda = load_cuda_functions(&libraries)?;
@@ -465,6 +518,7 @@ mod native {
                 device,
                 context,
                 config,
+                surfaces,
                 releases,
                 release_receiver,
                 current: None,
@@ -607,6 +661,7 @@ mod native {
                     ));
                 }
                 generation.mapped_surfaces = generation.mapped_surfaces.saturating_add(1);
+                self.surfaces.acquire();
                 let lease = NvdecSurfaceLease {
                     device_ptr,
                     pitch,
@@ -704,12 +759,14 @@ mod native {
                 let decoder = current.callback.decoder;
                 unmap_surface(self.nvdec, decoder, device_ptr);
                 current.mapped_surfaces = current.mapped_surfaces.saturating_sub(1);
+                self.surfaces.release();
                 return;
             }
             let mut destroy = None;
             if let Some(retired) = self.retired.get_mut(&generation) {
                 unmap_surface(self.nvdec, retired.decoder, device_ptr);
                 retired.mapped_surfaces = retired.mapped_surfaces.saturating_sub(1);
+                self.surfaces.release();
                 if retired.mapped_surfaces == 0 {
                     destroy = Some(retired.decoder);
                 }

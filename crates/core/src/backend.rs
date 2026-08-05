@@ -4,7 +4,11 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use thiserror::Error;
 
-use crate::{director::FastSignals, time::Timestamp};
+use crate::{
+    control::{GpuSurfaceRuntimeStats, SrtRuntimeStats},
+    director::FastSignals,
+    time::Timestamp,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CodecId {
@@ -121,10 +125,23 @@ pub struct TransportChunk {
 }
 
 #[async_trait]
+pub trait TransportObserver: Send + Sync {
+    async fn stats(&self) -> Result<SrtRuntimeStats, BackendError>;
+}
+
+#[async_trait]
 pub trait Transport: Send {
     async fn receive(&mut self) -> Result<TransportChunk, BackendError>;
     async fn send(&mut self, payload: &[u8]) -> Result<(), BackendError>;
     async fn close(&mut self) -> Result<(), BackendError>;
+
+    fn observer(&self) -> Option<Arc<dyn TransportObserver>> {
+        None
+    }
+}
+
+pub trait GpuSurfaceObserver: Send + Sync {
+    fn stats(&self) -> GpuSurfaceRuntimeStats;
 }
 
 pub trait Demuxer: Send {
@@ -141,6 +158,10 @@ pub trait Muxer: Send {
 pub trait VideoDecoder: Send {
     async fn decode(&mut self, packet: MediaPacket) -> Result<Vec<VideoFrame>, BackendError>;
     async fn flush(&mut self) -> Result<Vec<VideoFrame>, BackendError>;
+
+    fn surface_observer(&self) -> Option<Arc<dyn GpuSurfaceObserver>> {
+        None
+    }
 }
 
 #[async_trait]

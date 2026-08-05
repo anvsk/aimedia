@@ -273,6 +273,9 @@ pub struct OutputRuntimeState {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct QueueRuntimeState {
     pub name: String,
+    pub from: String,
+    pub to: String,
+    pub full_policy: String,
     pub depth: usize,
     pub capacity: usize,
     pub high_watermark: usize,

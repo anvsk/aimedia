@@ -363,10 +363,53 @@ impl Controller {
     }
 
     fn observe_queue(&mut self, name: &str, depth: usize) {
-        if let Some(queue) = self.queues.iter_mut().find(|queue| queue.name == name) {
+        for queue in self.queues.iter_mut().filter(|queue| queue.name == name) {
             queue.depth = depth.min(queue.capacity);
             queue.high_watermark = queue.high_watermark.max(queue.depth);
         }
+        for (index, state) in self.input_states[..self.input_count].iter_mut().enumerate() {
+            let input = &self.cameras[index].name;
+            if name.strip_suffix(".videoTimeline") == Some(input.as_str()) {
+                state.video_timeline_depth = depth;
+            } else if name.strip_suffix(".audioTimeline") == Some(input.as_str()) {
+                state.audio_timeline_depth = depth;
+            }
+        }
+    }
+
+    fn set_input_srt(&mut self, index: usize, stats: SrtRuntimeStats) {
+        if index >= self.input_count {
+            return;
+        }
+        if !stats.connected {
+            self.input_states[index].healthy = false;
+            self.input_states[index].synchronized = false;
+            self.cameras[index].healthy = false;
+            self.cameras[index].synchronized = false;
+            self.cameras[index].fast.transport_health = 0.0;
+        }
+        self.input_states[index].srt = stats;
+    }
+
+    fn set_output_srt(&mut self, stats: SrtRuntimeStats) {
+        self.output_state.srt = stats;
+    }
+
+    fn set_gpu_surfaces(&mut self, index: usize, stats: GpuSurfaceRuntimeStats) {
+        if index < self.input_count {
+            self.input_states[index].gpu = stats;
+        }
+    }
+
+    fn mark_input_discontinuity(&mut self, index: usize) {
+        if index >= self.input_count {
+            return;
+        }
+        self.input_states[index].healthy = false;
+        self.input_states[index].synchronized = false;
+        self.cameras[index].healthy = false;
+        self.cameras[index].synchronized = false;
+        self.cameras[index].fast.transport_health = 0.0;
     }
 
     fn record_decoded(&mut self, codec: CodecId, count: usize) {
@@ -377,6 +420,13 @@ impl Controller {
                     .codec
                     .video_decoded_frames
                     .saturating_add(count);
+                if count > 0 {
+                    self.input_states[0].healthy = true;
+                    self.input_states[0].synchronized = true;
+                    self.cameras[0].healthy = true;
+                    self.cameras[0].synchronized = true;
+                    self.cameras[0].fast.transport_health = 1.0;
+                }
             }
             CodecId::AacLc => {
                 self.input_states[0].codec.audio_decoded_frames = self.input_states[0]
@@ -442,12 +492,30 @@ impl Controller {
     }
 }
 
-fn queue_state(name: impl Into<String>, capacity: usize) -> QueueRuntimeState {
+fn queue_state(
+    name: impl Into<String>,
+    from: impl Into<String>,
+    to: impl Into<String>,
+    full_policy: FullPolicy,
+    capacity: usize,
+) -> QueueRuntimeState {
     QueueRuntimeState {
         name: name.into(),
+        from: from.into(),
+        to: to.into(),
+        full_policy: full_policy_name(full_policy).to_owned(),
         depth: 0,
         capacity,
         high_watermark: 0,
+    }
+}
+
+const fn full_policy_name(policy: FullPolicy) -> &'static str {
+    match policy {
+        FullPolicy::Backpressure => "backpressure",
+        FullPolicy::DropOldest => "dropOldest",
+        FullPolicy::KeepLatest => "keepLatest",
+        FullPolicy::FailJob => "failJob",
     }
 }
 
@@ -552,56 +620,29 @@ fn controller_queue_states(
     config: &PipelineConfig,
     plan: &ExecutionPlan,
 ) -> Result<Vec<QueueRuntimeState>, RuntimePlanError> {
-    let mut queues = Vec::with_capacity(config.inputs.len() * 5 + 1);
-    for (index, input) in config.inputs.iter().enumerate() {
-        queues.extend([
-            queue_state(
-                format!("{}.transport", input.name),
-                plan_queue_capacity(
-                    plan,
-                    &format!("input.{index}"),
-                    &format!("demux.{index}"),
-                    FullPolicy::Backpressure,
-                )?,
-            ),
-            queue_state(
-                format!("{}.videoDecode", input.name),
-                plan_queue_capacity(
-                    plan,
-                    &format!("demux.{index}"),
-                    &format!("video.decode.{index}"),
-                    FullPolicy::Backpressure,
-                )?,
-            ),
-            queue_state(
-                format!("{}.audioDecode", input.name),
-                plan_queue_capacity(
-                    plan,
-                    &format!("demux.{index}"),
-                    &format!("audio.decode.{index}"),
-                    FullPolicy::Backpressure,
-                )?,
-            ),
-            queue_state(
-                format!("{}.videoTimeline", input.name),
-                plan_queue_capacity(
-                    plan,
-                    &format!("video.decode.{index}"),
-                    "video.timeline",
-                    FullPolicy::Backpressure,
-                )?,
-            ),
-            queue_state(
-                format!("{}.audioTimeline", input.name),
-                plan_queue_capacity(
-                    plan,
-                    &format!("audio.decode.{index}"),
-                    "audio.timeline",
-                    FullPolicy::Backpressure,
-                )?,
-            ),
-        ]);
+    for index in 0..config.inputs.len() {
+        for (from, to) in [
+            (format!("input.{index}"), format!("demux.{index}")),
+            (format!("demux.{index}"), format!("video.decode.{index}")),
+            (format!("demux.{index}"), format!("audio.decode.{index}")),
+            (format!("video.decode.{index}"), "video.timeline".to_owned()),
+            (format!("audio.decode.{index}"), "audio.timeline".to_owned()),
+        ] {
+            plan_queue_capacity(plan, &from, &to, FullPolicy::Backpressure)?;
+        }
     }
+    let video_timeline = plan_queue_capacity(
+        plan,
+        "video.timeline",
+        "video.encode",
+        FullPolicy::Backpressure,
+    )?;
+    let audio_timeline = plan_queue_capacity(
+        plan,
+        "audio.timeline",
+        "audio.encode",
+        FullPolicy::Backpressure,
+    )?;
     let video_output = plan_queue_capacity(
         plan,
         "video.encode",
@@ -614,13 +655,72 @@ fn controller_queue_states(
         "mux.program",
         FullPolicy::Backpressure,
     )?;
-    if video_output != audio_output {
-        return Err(RuntimePlanError::Invariant(format!(
-            "the shared encoded queue requires equal video/audio capacities, got {video_output} and {audio_output}"
-        )));
+    let transport_output = plan_queue_capacity(
+        plan,
+        "mux.program",
+        "output.program",
+        FullPolicy::DropOldest,
+    )?;
+    if config.inputs.len() == 1 {
+        let input_video = plan_queue_capacity(
+            plan,
+            "video.decode.0",
+            "video.timeline",
+            FullPolicy::Backpressure,
+        )?;
+        let input_audio = plan_queue_capacity(
+            plan,
+            "audio.decode.0",
+            "audio.timeline",
+            FullPolicy::Backpressure,
+        )?;
+        if input_video != video_timeline || input_audio != audio_timeline {
+            return Err(RuntimePlanError::Invariant(
+                "fused timeline queues require equal input/output capacities".to_owned(),
+            ));
+        }
+        if video_output != audio_output || video_output != transport_output {
+            return Err(RuntimePlanError::Invariant(
+                "the fused program output queue requires equal encoded/transport capacities"
+                    .to_owned(),
+            ));
+        }
     }
-    queues.push(queue_state("program.output", video_output));
-    Ok(queues)
+    Ok(plan
+        .edges
+        .iter()
+        .map(|edge| {
+            queue_state(
+                physical_queue_name(config, &edge.from, &edge.to),
+                edge.from.clone(),
+                edge.to.clone(),
+                edge.queue.full_policy,
+                edge.queue.capacity,
+            )
+        })
+        .collect())
+}
+
+fn physical_queue_name(config: &PipelineConfig, from: &str, to: &str) -> String {
+    if config.inputs.len() == 1 {
+        let input = &config.inputs[0].name;
+        return match (from, to) {
+            ("input.0", "demux.0") => format!("{input}.transport"),
+            ("demux.0", "video.decode.0") => format!("{input}.videoDecode"),
+            ("demux.0", "audio.decode.0") => format!("{input}.audioDecode"),
+            ("video.decode.0", "video.timeline") | ("video.timeline", "video.encode") => {
+                format!("{input}.videoTimeline")
+            }
+            ("audio.decode.0", "audio.timeline") | ("audio.timeline", "audio.encode") => {
+                format!("{input}.audioTimeline")
+            }
+            ("video.encode", "mux.program")
+            | ("audio.encode", "mux.program")
+            | ("mux.program", "output.program") => "program.output".to_owned(),
+            _ => format!("{from}->{to}"),
+        };
+    }
+    format!("{from}->{to}")
 }
 
 #[derive(Debug, Clone)]
@@ -662,6 +762,22 @@ impl ControllerHandle {
 
     pub(crate) async fn observe_queue(&self, name: &str, depth: usize) {
         self.inner.lock().await.observe_queue(name, depth);
+    }
+
+    pub(crate) async fn set_input_srt(&self, index: usize, stats: SrtRuntimeStats) {
+        self.inner.lock().await.set_input_srt(index, stats);
+    }
+
+    pub(crate) async fn set_output_srt(&self, stats: SrtRuntimeStats) {
+        self.inner.lock().await.set_output_srt(stats);
+    }
+
+    pub(crate) async fn set_gpu_surfaces(&self, index: usize, stats: GpuSurfaceRuntimeStats) {
+        self.inner.lock().await.set_gpu_surfaces(index, stats);
+    }
+
+    pub(crate) async fn mark_input_discontinuity(&self, index: usize) {
+        self.inner.lock().await.mark_input_discontinuity(index);
     }
 
     pub(crate) async fn record_decoded(&self, codec: CodecId, count: usize) {
@@ -903,7 +1019,9 @@ mod tests {
     use aimedia_core::{ControlErrorCode, ControlRequest, PipelineConfig, PipelineMode};
     use aimedia_graph::compile as compile_plan;
 
-    use super::{ControllerHandle, DriftCorrector, ProgramClock, RuntimePlanError};
+    use super::{
+        ControllerHandle, DriftCorrector, ProgramClock, RuntimePlanError, full_policy_name,
+    };
 
     #[cfg(unix)]
     use super::{ControlServer, send_control_request};
@@ -1013,19 +1131,25 @@ mod tests {
     async fn controller_queue_state_comes_from_the_compiled_plan() {
         let config = single_config();
         let plan = compile_plan(&config).expect("plan compiles");
-        let expected_transport = plan
-            .queue("input.0", "demux.0")
-            .expect("transport edge exists")
-            .capacity;
         let controller =
             ControllerHandle::from_plan(&config, &plan, true).expect("plan is executable");
         let state = controller.state().await;
-        let transport = state
+        assert_eq!(state.queues.len(), plan.edges.len());
+        for edge in &plan.edges {
+            let queue = state
+                .queues
+                .iter()
+                .find(|queue| queue.from == edge.from && queue.to == edge.to)
+                .unwrap_or_else(|| panic!("queue {} -> {} is reported", edge.from, edge.to));
+            assert_eq!(queue.capacity, edge.queue.capacity);
+            assert_eq!(queue.full_policy, full_policy_name(edge.queue.full_policy));
+        }
+        let shared_output_edges = state
             .queues
             .iter()
-            .find(|queue| queue.name == "program.transport")
-            .expect("transport queue is reported");
-        assert_eq!(transport.capacity, expected_transport);
+            .filter(|queue| queue.name == "program.output")
+            .count();
+        assert_eq!(shared_output_edges, 3);
     }
 
     #[test]

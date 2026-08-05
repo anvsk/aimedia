@@ -84,8 +84,13 @@
   连续输出；最终视频/音频分别为 37.90/38.08 秒，PTS/DTS 无倒退。输出接收端移除时
   管线继续运行并显式丢弃 608 个视频包和 951 个音频包，输出队列恢复为 0；接收端
   重建后首个视频包为 IDR，PAT/PMT 可立即探测且 TS continuity error 为 0。
-- [ ] **V2-07 计划与运行状态一致性**：状态报告每条计划边的容量/水位、codec 帧数、
+- [x] **V2-07 计划与运行状态一致性**：状态报告每条计划边的容量/水位、codec 帧数、
   surface、重连和丢帧；差分测试防止 `explain` 与真实执行器漂移。
+  证据：PR [#16](https://github.com/anvsk/aimedia/pull/16) 的计划/运行时差分测试、
+  Linux workspace 测试和 NVIDIA feature
+  严格 Clippy 全绿；RTX 5060 Laptop + 577.12 实测中 12 条计划边全部可查，
+  视频/音频时间线深度与共享物理队列一致；输入恢复后 `reconnects=1`，
+  输出断开/恢复分别报告 `connected=false/true` 且 `reconnects=1`。
 - [ ] **V2-08 外部互操作**：OBS 与 FFmpeg 作为输入端，VLC、OBS、ffprobe 作为输出端；
   caller/listener、损坏 TS、1% 丢包、20ms 抖动和 40ms RTT。
 - [ ] **V2-09 性能与稳定性**：1080p30 两小时，新增延迟 p95 ≤ 180ms，PTS/DTS/PCR
