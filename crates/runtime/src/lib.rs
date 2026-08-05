@@ -11,8 +11,8 @@ use std::{
 use aimedia_core::{
     CameraSnapshot, ControlCommand, ControlErrorCode, ControlRequest, ControlResponse, Director,
     FastSignals, GpuSurfaceRuntimeStats, InputCodecRuntimeStats, InputRuntimeState,
-    OutputRuntimeState, PipelineConfig, PipelineMode, PipelineRuntimeState, QueueRuntimeState,
-    SrtRuntimeStats, SwitchReason, backend::CodecId,
+    LatencyRuntimeStats, OutputRuntimeState, PipelineConfig, PipelineMode, PipelineRuntimeState,
+    QueueRuntimeState, SrtRuntimeStats, SwitchReason, backend::CodecId,
 };
 pub use aimedia_graph::QueueCapacities;
 use aimedia_graph::{
@@ -150,6 +150,63 @@ impl DriftCorrector {
     }
 }
 
+const LATENCY_BUCKET_MAX_MS: usize = 2_000;
+
+#[derive(Debug)]
+struct LatencyHistogram {
+    buckets: Box<[u64]>,
+    samples: u64,
+    max_ms: u64,
+}
+
+impl Default for LatencyHistogram {
+    fn default() -> Self {
+        Self {
+            buckets: vec![0; LATENCY_BUCKET_MAX_MS + 2].into_boxed_slice(),
+            samples: 0,
+            max_ms: 0,
+        }
+    }
+}
+
+impl LatencyHistogram {
+    fn observe(&mut self, latency: Duration) {
+        let micros = latency.as_micros();
+        let milliseconds = micros.saturating_add(999) / 1_000;
+        let milliseconds = milliseconds.min(u128::from(u64::MAX)) as u64;
+        let bucket = usize::try_from(milliseconds)
+            .unwrap_or(usize::MAX)
+            .min(LATENCY_BUCKET_MAX_MS + 1);
+        self.buckets[bucket] = self.buckets[bucket].saturating_add(1);
+        self.samples = self.samples.saturating_add(1);
+        self.max_ms = self.max_ms.max(milliseconds);
+    }
+
+    fn summary(&self) -> LatencyRuntimeStats {
+        LatencyRuntimeStats {
+            samples: self.samples,
+            p50_ms: self.percentile(50),
+            p95_ms: self.percentile(95),
+            max_ms: self.max_ms,
+        }
+    }
+
+    fn percentile(&self, percentile: u64) -> u64 {
+        if self.samples == 0 {
+            return 0;
+        }
+        let rank = self.samples.saturating_mul(percentile).saturating_add(99) / 100;
+        let mut cumulative = 0_u64;
+        for (milliseconds, count) in self.buckets.iter().copied().enumerate() {
+            cumulative = cumulative.saturating_add(count);
+            if cumulative >= rank {
+                return milliseconds as u64;
+            }
+        }
+        (LATENCY_BUCKET_MAX_MS + 1) as u64
+    }
+}
+
 #[derive(Debug)]
 struct Controller {
     pipeline: String,
@@ -160,6 +217,7 @@ struct Controller {
     cameras: [CameraSnapshot; 2],
     input_states: [InputRuntimeState; 2],
     output_state: OutputRuntimeState,
+    engine_latency: LatencyHistogram,
     queues: Vec<QueueRuntimeState>,
     last_reason: SwitchReason,
 }
@@ -223,6 +281,7 @@ impl Controller {
             cameras,
             input_states,
             output_state: OutputRuntimeState::default(),
+            engine_latency: LatencyHistogram::default(),
             queues,
             last_reason: SwitchReason::Initial,
         })
@@ -240,6 +299,8 @@ impl Controller {
 
     fn state(&self) -> PipelineRuntimeState {
         let active = self.director.active_input();
+        let mut output = self.output_state.clone();
+        output.engine_latency = self.engine_latency.summary();
         PipelineRuntimeState {
             pipeline: self.pipeline.clone(),
             running: self.running,
@@ -258,7 +319,7 @@ impl Controller {
                 self.director.hold_until_ms()
             },
             inputs: self.input_states[..self.input_count].to_vec(),
-            output: self.output_state.clone(),
+            output,
             queues: self.queues.clone(),
             last_reason: format!("{:?}", self.last_reason),
         }
@@ -484,6 +545,10 @@ impl Controller {
         }
     }
 
+    fn record_engine_latency(&mut self, latency: Duration) {
+        self.engine_latency.observe(latency);
+    }
+
     fn finish(&mut self) {
         self.running = false;
         for queue in &mut self.queues {
@@ -633,7 +698,7 @@ fn controller_queue_states(
             plan,
             &format!("video.decode.{index}"),
             "video.timeline",
-            FullPolicy::KeepLatest,
+            FullPolicy::Backpressure,
         )?;
     }
     let video_timeline = plan_queue_capacity(
@@ -671,7 +736,7 @@ fn controller_queue_states(
             plan,
             "video.decode.0",
             "video.timeline",
-            FullPolicy::KeepLatest,
+            FullPolicy::Backpressure,
         )?;
         let input_audio = plan_queue_capacity(
             plan,
@@ -799,6 +864,10 @@ impl ControllerHandle {
 
     pub(crate) async fn record_output_drop(&self, codec: CodecId) {
         self.inner.lock().await.record_output_drop(codec);
+    }
+
+    pub(crate) async fn record_engine_latency(&self, latency: Duration) {
+        self.inner.lock().await.record_engine_latency(latency);
     }
 
     pub(crate) async fn finish(&self) {
@@ -1021,11 +1090,14 @@ pub async fn run_mock_pipeline(config: PipelineConfig) -> Result<(), RuntimeErro
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use aimedia_core::{ControlErrorCode, ControlRequest, PipelineConfig, PipelineMode};
     use aimedia_graph::compile as compile_plan;
 
     use super::{
-        ControllerHandle, DriftCorrector, ProgramClock, RuntimePlanError, full_policy_name,
+        ControllerHandle, DriftCorrector, LatencyHistogram, ProgramClock, RuntimePlanError,
+        full_policy_name,
     };
 
     #[cfg(unix)]
@@ -1054,6 +1126,19 @@ mod tests {
         let mut corrector = DriftCorrector::new(0);
         assert_eq!(corrector.update(80, 1_000), -1_000);
         assert_eq!(corrector.update(80, 2_000), -2_000);
+    }
+
+    #[test]
+    fn latency_histogram_reports_bounded_percentiles() {
+        let mut histogram = LatencyHistogram::default();
+        for milliseconds in 1..=100_u64 {
+            histogram.observe(Duration::from_millis(milliseconds));
+        }
+        let summary = histogram.summary();
+        assert_eq!(summary.samples, 100);
+        assert_eq!(summary.p50_ms, 50);
+        assert_eq!(summary.p95_ms, 95);
+        assert_eq!(summary.max_ms, 100);
     }
 
     #[tokio::test]

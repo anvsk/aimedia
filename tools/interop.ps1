@@ -402,11 +402,11 @@ function Invoke-BacklogScenario {
     $timeline = $state.queues | Where-Object {
         $_.from -eq "video.decode.0" -and $_.to -eq "video.timeline"
     } | Select-Object -First 1
-    if ($null -eq $timeline -or $timeline.capacity -ne 1 -or $timeline.fullPolicy -ne "keepLatest") {
-        throw "backlog scenario did not run with the capacity-1 keepLatest video slot"
+    if ($null -eq $timeline -or $timeline.capacity -ne 1 -or $timeline.fullPolicy -ne "backpressure") {
+        throw "backlog scenario did not run with the capacity-1 backpressure video slot"
     }
-    if ($state.inputs[0].codec.videoDroppedFrames -lt 1) {
-        throw "backlog scenario did not exercise latest-frame replacement"
+    if ($state.inputs[0].codec.videoDroppedFrames -ne 0) {
+        throw "backlog scenario dropped decoded video despite bounded backpressure"
     }
     if ($state.inputs[0].gpu.highWatermark -gt $state.inputs[0].gpu.capacity) {
         throw "NVDEC surface high watermark exceeded its declared capacity"

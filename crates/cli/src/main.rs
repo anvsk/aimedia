@@ -12,7 +12,7 @@ use aimedia_core::{
     vlm::VlmAdvice,
 };
 use aimedia_graph::{ExecutionPlan, compile as compile_plan};
-use aimedia_mpegts::{DemuxEvent, ProgramMap, StreamDemuxer, probe_path};
+use aimedia_mpegts::{DemuxEvent, MuxStream, ProgramMap, StreamDemuxer, StreamPacket, probe_path};
 use aimedia_nvidia::NvidiaLibraries;
 use aimedia_runtime::{run_mock_pipeline, send_control_request};
 use aimedia_srt::{Endpoint, SrtTransport, probe_version as probe_srt_version};
@@ -128,6 +128,84 @@ impl From<SrtCliMode> for SrtMode {
             SrtCliMode::Caller => Self::Caller,
             SrtCliMode::Listener => Self::Listener,
         }
+    }
+}
+
+#[derive(Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MonotonicSeries {
+    samples: u64,
+    regressions: u64,
+    first: Option<u64>,
+    last: Option<u64>,
+    max_gap: u64,
+}
+
+impl MonotonicSeries {
+    fn observe(&mut self, value: u64) {
+        self.first.get_or_insert(value);
+        if let Some(previous) = self.last {
+            if value < previous {
+                self.regressions = self.regressions.saturating_add(1);
+            } else {
+                self.max_gap = self.max_gap.max(value - previous);
+            }
+        }
+        self.last = Some(value);
+        self.samples = self.samples.saturating_add(1);
+    }
+}
+
+#[derive(Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LiveProbeTiming {
+    video_packets: u64,
+    audio_packets: u64,
+    first_video_keyframe: bool,
+    video_pts_90khz: MonotonicSeries,
+    video_dts_90khz: MonotonicSeries,
+    audio_pts_90khz: MonotonicSeries,
+    audio_dts_90khz: MonotonicSeries,
+    pcr_27mhz: MonotonicSeries,
+    #[serde(skip)]
+    previous_pcr_raw: Option<u64>,
+    #[serde(skip)]
+    pcr_wrap_offset: u64,
+}
+
+impl LiveProbeTiming {
+    fn observe_packet(&mut self, packet: &StreamPacket) {
+        match packet.stream {
+            MuxStream::Video => {
+                if self.video_packets == 0 {
+                    self.first_video_keyframe = packet.keyframe;
+                }
+                self.video_packets = self.video_packets.saturating_add(1);
+                self.video_pts_90khz.observe(packet.pts_90khz);
+                self.video_dts_90khz
+                    .observe(packet.dts_90khz.unwrap_or(packet.pts_90khz));
+            }
+            MuxStream::Audio => {
+                self.audio_packets = self.audio_packets.saturating_add(1);
+                self.audio_pts_90khz.observe(packet.pts_90khz);
+                self.audio_dts_90khz
+                    .observe(packet.dts_90khz.unwrap_or(packet.pts_90khz));
+            }
+        }
+    }
+
+    fn observe_pcr(&mut self, raw: u64) {
+        const PCR_MODULUS: u64 = (1_u64 << 33) * 300;
+        const PCR_HALF_RANGE: u64 = PCR_MODULUS / 2;
+        if self
+            .previous_pcr_raw
+            .is_some_and(|previous| raw.saturating_add(PCR_HALF_RANGE) < previous)
+        {
+            self.pcr_wrap_offset = self.pcr_wrap_offset.saturating_add(PCR_MODULUS);
+        }
+        self.previous_pcr_raw = Some(raw);
+        self.pcr_27mhz
+            .observe(self.pcr_wrap_offset.saturating_add(raw));
     }
 }
 
@@ -276,8 +354,8 @@ async fn command_probe_srt(
     mode: Option<SrtCliMode>,
     duration_ms: u64,
 ) -> Result<()> {
-    if duration_ms == 0 || duration_ms > 60_000 {
-        bail!("--duration-ms must be between 1 and 60000");
+    if duration_ms == 0 || duration_ms > 86_400_000 {
+        bail!("--duration-ms must be between 1 and 86400000");
     }
     let config = SrtConfig {
         mode: mode.map(Into::into),
@@ -300,6 +378,7 @@ async fn command_probe_srt(
     let mut corrupt_units = 0_u64;
     let mut sync_recovered_bytes = 0_u64;
     let mut program_map: Option<ProgramMap> = None;
+    let mut timing = LiveProbeTiming::default();
 
     while started.elapsed() < deadline {
         let chunk = transport.receive().await?;
@@ -311,7 +390,13 @@ async fn command_probe_srt(
         for event in demuxer.push(&chunk.data)? {
             match event {
                 DemuxEvent::ProgramMap(map) => program_map = Some(map),
-                DemuxEvent::Packet(_) => media_packets = media_packets.saturating_add(1),
+                DemuxEvent::Packet(packet) => {
+                    media_packets = media_packets.saturating_add(1);
+                    timing.observe_packet(&packet);
+                }
+                DemuxEvent::ClockReference { pcr_27mhz, .. } => {
+                    timing.observe_pcr(pcr_27mhz);
+                }
                 DemuxEvent::ContinuityError { .. } => {
                     continuity_errors = continuity_errors.saturating_add(1);
                 }
@@ -329,8 +414,9 @@ async fn command_probe_srt(
         }
     }
     for event in demuxer.flush()? {
-        if matches!(event, DemuxEvent::Packet(_)) {
+        if let DemuxEvent::Packet(packet) = event {
             media_packets = media_packets.saturating_add(1);
+            timing.observe_packet(&packet);
         }
     }
     let stats = transport.stats().await?;
@@ -345,6 +431,7 @@ async fn command_probe_srt(
         "corruptUnits": corrupt_units,
         "syncRecoveredBytes": sync_recovered_bytes,
         "program": program_map,
+        "timing": timing,
         "srt": stats,
     });
     if output_json {

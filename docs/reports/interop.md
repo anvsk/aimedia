@@ -95,13 +95,15 @@ output listener 的接收端。合并 PR #17 时的 `main` 镜像稳定失败：
 NVIDIA operation cuvidMapVideoFrame64 failed with code 205
 ```
 
-PR [#18](https://github.com/anvsk/aimedia/pull/18) 将解码视频到节目时间线改为容量 1
-的 `keepLatest` slot。过期视频 surface 在
-下一次突发解码前释放，压缩包和音频队列仍保持有界 backpressure。相同脚本结果：
+PR [#18](https://github.com/anvsk/aimedia/pull/18) 先将解码视频到节目时间线限制为容量 1，
+阻止输出未连接时无限持有 NVDEC surface。后续 1080p30 预检发现 `keepLatest` 会在
+SRT 突发交付时替换仍然有效的帧，因此 V2-09 将它收紧为容量 1 的 `backpressure`，
+并在视频和音频解码前增加与队列消费绑定的许可。这样既不把“生产者手里的帧”藏在
+队列水位之外，也不靠丢帧维持 surface 上限。相同脚本的最终结果：
 
 - 旧镜像退出码 1，修复镜像的发送端、接收端和 aimedia 退出码均为 0；
-- 明确替换 143 个过期视频帧；
-- NVDEC surface 容量由随 `bufferMs` 扩张的 34 降为固定 4，高水位 4；
+- 视频丢帧为 0，视频时间线容量为 1、策略为 `backpressure`；
+- NVDEC surface 容量由随 `bufferMs` 扩张的 34 降为固定 4，最终高水位 3；
 - 输出 300 个视频包和 469 个音频包；
 - 首视频包为 keyframe，PTS/DTS 单调。
 
@@ -110,8 +112,8 @@ PR [#18](https://github.com/anvsk/aimedia/pull/18) 将解码视频到节目时�
 
 ## 已知限制与下一门槛
 
-- 延迟 output listener 的 NVDEC 205 已有失败对照与修复回归；V2-09 仍需两小时
-  1080p30 soak、延迟 p95 和 RSS/GPU 内存趋势证据，当前不宣称生产稳定。
+- 延迟 output listener 的 NVDEC 205 已有失败对照、容量 1 背压和零丢帧修复回归；
+  V2-09 的两小时 1080p30 soak、延迟 p95 和 RSS/GPU 内存趋势由独立性能报告记录。
 - OBS 的 `cleanShutdown=false` 是当前本机测试工具镜像的独立已知问题；它不会改写
   aimedia 的退出码或媒体结果。
 - 本报告证明 v0.2 支持范围内的外部互操作，不证明 RTMP、RTSP、H.265、缩放、变帧率

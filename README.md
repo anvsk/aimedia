@@ -42,12 +42,11 @@
 
 尚未完成，也不会伪装为已经完成：
 
-- OBS/VLC 等更广互操作、网络损伤测试和两小时 soak；
 - 通用 `MediaJob` v2 配置、多输出和 Analyzer Tap 数据面。
 
-开发分支的 `aimedia run` 已能执行带输入/输出恢复的单路 SRT 原生 GPU 数据面，但在
-兼容覆盖和长稳门槛完成前仍只标记为 `experimental`。实时能力以
-[支持矩阵](docs/support-matrix.md)为准。
+单路 SRT 原生 GPU 数据面已通过 FFmpeg/OBS/VLC 互操作、网络损伤、断流恢复和
+[1080p30 两小时门禁](docs/reports/v0.2-native-live-pipe.md)。在 v0.2 Release 创建前仍
+标记为 `experimental`；实时能力以[支持矩阵](docs/support-matrix.md)为准。
 
 ## 快速体验
 

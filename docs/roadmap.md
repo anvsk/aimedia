@@ -99,15 +99,15 @@
   输出通过；VLC 3.0.20 raw dump 后由 ffprobe 验证 H.264/AAC、首包 keyframe 与
   PTS/DTS 单调。OBS 本机工具镜像的 teardown crash 与延迟 output listener 触发的
   NVDEC map 失败均已作为独立已知问题保留，没有隐藏在“通过”结论中。
-- [ ] **V2-09 性能与稳定性**：1080p30 两小时，新增延迟 p95 ≤ 180ms，PTS/DTS/PCR
+- [x] **V2-09 性能与稳定性**：1080p30 两小时，新增延迟 p95 ≤ 180ms，PTS/DTS/PCR
   单调，RSS/GPU 内存不持续增长，运行镜像无 FFmpeg/libav；修复输入 caller 已积压时
   延迟 output listener 连接导致的 `cuvidMapVideoFrame64` 205，并加入 surface 生命周期
   与延迟接收端回归。
-  进度：PR [#18](https://github.com/anvsk/aimedia/pull/18) 将实时视频时间线改为容量 1
-  的 `keepLatest` slot；同一 4 秒积压场景中，
-  旧 `main` 镜像稳定返回 NVDEC 205，修复镜像三端退出码均为 0，替换 143 个过期帧，
-  surface 高水位 4/4，输出首包 IDR 且 PTS/DTS 单调。两小时 soak、延迟和内存趋势
-  尚未完成，因此本项保持未勾选。
+  证据：[性能与稳定性报告](reports/v0.2-native-live-pipe.md)。RTX 5060 Laptop +
+  577.12 驱动连续运行 7,215 秒，216,017 个运行时视频样本的 p50/p95 为
+  134/173ms；视频/音频零丢帧，PTS/DTS/PCR 零倒退，surface 高水位 3/4，RSS
+  首尾窗口 +2.5MiB，设备显存 178→178MiB，运行镜像无 FFmpeg/libav。延迟 4 秒连接
+  output listener 的回归同样零丢帧且未再出现 NVDEC 205。
 - [ ] **V2-10 发布**：更新支持矩阵和 `docs/reports/v0.2-native-live-pipe.md`，创建 tag、
   GitHub Release、可复现实验命令和演示素材。
 - [ ] **V2-11 社区发布**：发布 Hacker News 与一个最相关 Reddit 社区，清楚列出支持与

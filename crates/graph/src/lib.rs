@@ -180,20 +180,20 @@ impl QueueCapacities {
     pub fn from_config(config: &PipelineConfig) -> Self {
         let buffer_ms = config.sync.buffer_ms;
         let fps = u64::from(config.media.video.fps);
-        let video_frames = ceil_div(buffer_ms.saturating_mul(fps), 1_000)
-            .saturating_add(2)
-            .clamp(4, 256) as usize;
-        let audio_blocks = ceil_div(
+        // bufferMs is an upper bound for the whole in-engine path, not a fill target. Eight
+        // serial scheduling/storage points share it; backpressure preserves data at small sizes.
+        let video_budget = ceil_div(buffer_ms.saturating_mul(fps), 1_000);
+        let audio_budget = ceil_div(
             buffer_ms.saturating_mul(u64::from(config.media.audio.sample_rate)),
             1_024 * 1_000,
-        )
-        .saturating_add(2)
-        .clamp(4, 512) as usize;
+        );
+        let video_frames = ceil_div(video_budget, 8).clamp(1, 32) as usize;
+        let audio_blocks = ceil_div(audio_budget, 8).clamp(1, 64) as usize;
         Self {
             video_frames,
             audio_blocks,
-            transport_messages: video_frames.saturating_mul(8).clamp(32, 2_048),
-            encoded_messages: video_frames.saturating_mul(8).clamp(32, 2_048),
+            transport_messages: video_frames,
+            encoded_messages: video_frames,
         }
     }
 }
@@ -361,7 +361,7 @@ pub fn compile(config: &PipelineConfig) -> Result<ExecutionPlan, CompileError> {
             MemoryDomain::NvidiaDevice,
             ClockDomain::Source,
             1,
-            FullPolicy::KeepLatest,
+            FullPolicy::Backpressure,
         ));
         edges.push(edge(
             &format!("audio.decode.{index}"),
@@ -589,7 +589,7 @@ mod tests {
         assert_eq!(
             plan.queue("input.0", "demux.0"),
             Some(QueueContract {
-                capacity: 256,
+                capacity: 4,
                 full_policy: FullPolicy::Backpressure,
             })
         );
@@ -597,7 +597,7 @@ mod tests {
             plan.queue("video.decode.0", "video.timeline"),
             Some(QueueContract {
                 capacity: 1,
-                full_policy: FullPolicy::KeepLatest,
+                full_policy: FullPolicy::Backpressure,
             })
         );
         assert_eq!(
