@@ -148,7 +148,15 @@ v0.3 工程。只有 V2-11 也完成后，总览才把 v0.2 标记为完全完�
     48kHz 双声道桥接、RTSP 状态、Linux workspace 43 项测试、严格 Clippy、
     cargo-deny、release Docker build 和 `explain` 图烟雾检查通过。外部摄像机、GPU
     真实闭环和长稳仍由 V3-02F 验收，因此尚不升级为 `supported`。
-  - [ ] V3-02D：UDP RTP/RTCP、固定重排窗口、超时和重连。
+  - [ ] V3-02D：会话恢复与 UDP 可靠性。
+    - [x] V3-02D1：TCP 读超时/断流后按有上限的指数退避重连；重连期间不缓存
+      历史媒体，恢复后分别标记视频和音频 discontinuity，媒体规格变化则明确终止。
+      证据：PR [#29](https://github.com/anvsk/aimedia/pull/29)，本机伪摄像机两次
+      `DESCRIBE/SETUP/PLAY` 闭环和断线恢复状态通过；Linux workspace 44 项测试、
+      严格 Clippy、cargo-deny 和 release Docker 构建通过。
+    - [ ] V3-02D2：UDP RTP/RTCP 和固定重排窗口。已确认固定的 Retina 0.4.19
+      会在公开 `PacketItem` 之前丢弃乱序 UDP 包，因此不允许只开启上游 UDP 开关就
+      宣称完成；该切片需在库内实现重排或对上游做可审查的最小补丁。
   - [ ] V3-02E：H.265 RTP 重组、明确 bridge pending 与 V3-04 handoff。
   - [ ] V3-02F：外部设备、网络损伤、两小时 soak 和支持矩阵升级。
 - [ ] **V3-03 RTMP/RTMPS 与 FLV**：输入、输出、FLV demux/mux。

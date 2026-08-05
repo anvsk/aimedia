@@ -33,7 +33,7 @@ use retina::{
     codec::{CodecItem, FrameFormat, ParametersRef},
 };
 use thiserror::Error;
-use tokio::time::timeout;
+use tokio::time::{sleep, timeout};
 use url::Url;
 
 const MAX_SDP_BYTES: usize = 256 * 1024;
@@ -140,7 +140,7 @@ impl RtspEndpoint {
         &self.reconnect
     }
 
-    /// Configured maintenance interval for the reconnecting runtime in V3-02C.
+    /// Configured maintenance interval for the reconnecting runtime.
     /// Retina still negotiates the actual in-session keepalive cadence with the server.
     #[must_use]
     pub const fn keepalive_interval(&self) -> Duration {
@@ -252,6 +252,7 @@ pub enum RtspErrorCode {
     ReadTimeout,
     ReceiveFailed,
     EndOfStream,
+    MediaProfileChanged,
     TeardownTimeout,
     TeardownFailed,
 }
@@ -276,6 +277,7 @@ impl RtspErrorCode {
             Self::ReadTimeout => "readTimeout",
             Self::ReceiveFailed => "receiveFailed",
             Self::EndOfStream => "endOfStream",
+            Self::MediaProfileChanged => "mediaProfileChanged",
             Self::TeardownTimeout => "teardownTimeout",
             Self::TeardownFailed => "teardownFailed",
         }
@@ -447,6 +449,15 @@ impl RtspMediaProfile {
             .cloned();
         Ok(Self { video, audio })
     }
+
+    fn is_compatible_with(&self, other: &Self) -> bool {
+        track_format(&self.video) == track_format(&other.video)
+            && self.audio.as_ref().map(track_format) == other.audio.as_ref().map(track_format)
+    }
+}
+
+fn track_format(track: &TrackDescriptor) -> (TrackKind, Option<RtspCodec>, u32, Option<u16>) {
+    (track.kind, track.codec, track.clock_rate, track.channels)
 }
 
 /// A live, pull-based RTSP source. No internal unbounded media queue is created.
@@ -686,9 +697,10 @@ impl RtspSession {
 /// Runtime-facing RTSP source that converts depacketized protocol events into aimedia packets.
 /// RTCP stays inside the adapter and no hidden media queue is introduced.
 pub struct RtspPacketSource {
+    endpoint: RtspEndpoint,
     session: Option<RtspSession>,
     profile: RtspMediaProfile,
-    pending_discontinuity: bool,
+    pending_discontinuity: [bool; 2],
     stats: Arc<RtspStatsState>,
 }
 
@@ -705,7 +717,7 @@ impl fmt::Debug for RtspPacketSource {
 impl RtspPacketSource {
     pub async fn connect(endpoint: RtspEndpoint) -> Result<Self, RtspError> {
         let transport = endpoint.transport();
-        let session = RtspSession::connect(endpoint).await?;
+        let session = RtspSession::connect(endpoint.clone()).await?;
         let profile = match RtspMediaProfile::from_tracks(session.tracks()) {
             Ok(profile) => profile,
             Err(error) => {
@@ -714,9 +726,10 @@ impl RtspPacketSource {
             }
         };
         Ok(Self {
+            endpoint,
             session: Some(session),
             profile,
-            pending_discontinuity: false,
+            pending_discontinuity: [false; 2],
             stats: Arc::new(RtspStatsState::new(transport)),
         })
     }
@@ -726,7 +739,7 @@ impl RtspPacketSource {
         &self.profile
     }
 
-    async fn next_packet(&mut self) -> Result<MediaPacket, RtspError> {
+    async fn next_packet_from_session(&mut self) -> Result<MediaPacket, RtspError> {
         loop {
             let session = self.session.as_mut().ok_or_else(|| {
                 RtspError::new(
@@ -755,7 +768,7 @@ impl RtspPacketSource {
                     };
                     let discontinuity = frame.discontinuity
                         || frame.parameters_changed
-                        || std::mem::take(&mut self.pending_discontinuity);
+                        || std::mem::take(&mut self.pending_discontinuity[0]);
                     return Ok(MediaPacket {
                         stream_id: frame.stream_id as u32,
                         codec,
@@ -778,7 +791,7 @@ impl RtspPacketSource {
                         }
                     };
                     let discontinuity =
-                        frame.discontinuity || std::mem::take(&mut self.pending_discontinuity);
+                        frame.discontinuity || std::mem::take(&mut self.pending_discontinuity[1]);
                     return Ok(MediaPacket {
                         stream_id: frame.stream_id as u32,
                         codec,
@@ -793,8 +806,54 @@ impl RtspPacketSource {
                         data: frame.data,
                     });
                 }
-                MediaEvent::Discontinuity(_) => self.pending_discontinuity = true,
+                MediaEvent::Discontinuity(_) => self.pending_discontinuity = [true; 2],
                 MediaEvent::Rtcp(_) => {}
+            }
+        }
+    }
+
+    async fn reconnect(&mut self) -> Result<(), RtspError> {
+        self.stats.connected.store(false, Ordering::Relaxed);
+        // A failed media session is no longer usable. Dropping it closes its sockets without
+        // delaying recovery on a TEARDOWN exchange that is unlikely to succeed.
+        drop(self.session.take());
+
+        let mut attempt = 0_u32;
+        loop {
+            sleep(self.endpoint.retry_delay(attempt)).await;
+            match RtspSession::connect(self.endpoint.clone()).await {
+                Ok(session) => {
+                    let next_profile = match RtspMediaProfile::from_tracks(session.tracks()) {
+                        Ok(profile) => profile,
+                        Err(error) => {
+                            let _ = session.close().await;
+                            return Err(error);
+                        }
+                    };
+                    if !self.profile.is_compatible_with(&next_profile) {
+                        let _ = session.close().await;
+                        return Err(RtspError::new(
+                            RtspErrorCode::MediaProfileChanged,
+                            RtspErrorStage::Describe,
+                            false,
+                            format!(
+                                "camera media profile changed during reconnect: expected {:?}, received {:?}",
+                                self.profile, next_profile
+                            ),
+                        ));
+                    }
+
+                    self.profile = next_profile;
+                    self.session = Some(session);
+                    self.pending_discontinuity = [true; 2];
+                    self.stats.reconnects.fetch_add(1, Ordering::Relaxed);
+                    self.stats.connected.store(true, Ordering::Relaxed);
+                    return Ok(());
+                }
+                Err(error) if error.retryable => {
+                    attempt = attempt.saturating_add(1);
+                }
+                Err(error) => return Err(error),
             }
         }
     }
@@ -888,11 +947,19 @@ fn backend_error(error: RtspError) -> BackendError {
 #[async_trait]
 impl PacketSource for RtspPacketSource {
     async fn receive_packet(&mut self) -> Result<MediaPacket, BackendError> {
-        match self.next_packet().await {
-            Ok(packet) => Ok(packet),
-            Err(error) => {
-                self.stats.connected.store(false, Ordering::Relaxed);
-                Err(backend_error(error))
+        loop {
+            match self.next_packet_from_session().await {
+                Ok(packet) => return Ok(packet),
+                Err(error) if error.retryable && self.endpoint.reconnect().enabled => {
+                    if let Err(error) = self.reconnect().await {
+                        self.stats.connected.store(false, Ordering::Relaxed);
+                        return Err(backend_error(error));
+                    }
+                }
+                Err(error) => {
+                    self.stats.connected.store(false, Ordering::Relaxed);
+                    return Err(backend_error(error));
+                }
             }
         }
     }
@@ -1172,7 +1239,7 @@ mod tests {
 
     use aimedia_core::{
         Timestamp,
-        backend::{AudioDecoder, CodecId, MediaPacket, PacketSource},
+        backend::{AudioDecoder, BackendError, CodecId, MediaPacket, PacketSource},
         config::{ReconnectConfig, RtspConfig, RtspTransport, SecretRef},
     };
     use bytes::Bytes;
@@ -1336,6 +1403,82 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn tcp_packet_source_reconnects_without_buffering_old_media() {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("mock camera should bind");
+        let address = listener.local_addr().expect("mock camera has an address");
+        let server = tokio::spawn(async move {
+            let (first, _) = listener.accept().await?;
+            serve_mock_camera_once(first, address.port(), true).await?;
+            let (second, _) = listener.accept().await?;
+            serve_mock_camera_once(second, address.port(), false).await
+        });
+
+        let mut reconnect_config = config();
+        reconnect_config.read_timeout_ms = 500;
+        reconnect_config.reconnect.initial_backoff_ms = 100;
+        reconnect_config.reconnect.max_backoff_ms = 200;
+        let endpoint =
+            RtspEndpoint::from_config(&format!("rtsp://{address}/live"), &reconnect_config)
+                .expect("loopback endpoint should be valid");
+        let mut source = RtspPacketSource::connect(endpoint)
+            .await
+            .expect("first mock RTSP session should connect");
+        let observer = source.observer().expect("RTSP source exposes state");
+
+        let first = source
+            .receive_packet()
+            .await
+            .expect("first session should emit an access unit");
+        assert!(!first.discontinuity);
+
+        let recovering = tokio::spawn(async move {
+            let packet = source.receive_packet().await?;
+            Ok::<_, BackendError>((packet, source))
+        });
+        tokio::time::timeout(Duration::from_millis(500), async {
+            loop {
+                if !observer
+                    .stats()
+                    .await
+                    .expect("reconnect state should sample")
+                    .connected
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("source should report disconnected during backoff");
+
+        let (second, mut source) = recovering
+            .await
+            .expect("reconnect task should join")
+            .expect("second session should emit an access unit");
+        assert!(second.discontinuity);
+        assert!(second.keyframe);
+        assert!(
+            source.pending_discontinuity[1],
+            "video recovery must not consume the audio discontinuity"
+        );
+        let recovered = observer
+            .stats()
+            .await
+            .expect("recovered state should sample");
+        assert!(recovered.connected);
+        assert_eq!(recovered.reconnects, 1);
+        assert_eq!(recovered.packets_received, 2);
+
+        source.close().await.expect("second session should close");
+        server
+            .await
+            .expect("mock reconnect camera task should not panic")
+            .expect("mock reconnect camera should complete without I/O errors");
+    }
+
+    #[tokio::test]
     async fn g711_bridge_emits_bounded_1024_sample_48khz_stereo_blocks() {
         for (rtsp_codec, packet_codec, silence) in [
             (RtspCodec::G711Alaw, CodecId::G711Alaw, 0xd5),
@@ -1374,7 +1517,15 @@ mod tests {
         }
     }
 
-    async fn serve_mock_camera(mut socket: TcpStream, port: u16) -> io::Result<()> {
+    async fn serve_mock_camera(socket: TcpStream, port: u16) -> io::Result<()> {
+        serve_mock_camera_once(socket, port, false).await
+    }
+
+    async fn serve_mock_camera_once(
+        mut socket: TcpStream,
+        port: u16,
+        disconnect_after_frame: bool,
+    ) -> io::Result<()> {
         let mut pending = Vec::new();
         let mut setup_count = 0_u8;
         loop {
@@ -1437,6 +1588,9 @@ mod tests {
                     )
                     .await?;
                     write_h264_idr(&mut socket).await?;
+                    if disconnect_after_frame {
+                        return Ok(());
+                    }
                 }
                 "GET_PARAMETER" => {
                     write_response(&mut socket, &cseq, "Session: aimedia-test\r\n", b"").await?;
