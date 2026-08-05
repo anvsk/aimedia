@@ -13,7 +13,7 @@ pub mod sync;
 pub mod time;
 pub mod vlm;
 
-pub use config::{ConfigError, PipelineConfig};
+pub use config::{ConfigError, MediaJob, PipelineConfig, convert_legacy_yaml};
 pub use control::{
     ControlCommand, ControlErrorCode, ControlRequest, ControlResponse, GpuSurfaceRuntimeStats,
     InputCodecRuntimeStats, InputRuntimeState, LatencyRuntimeStats, OutputRuntimeState,

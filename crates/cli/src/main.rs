@@ -9,6 +9,7 @@ use aimedia_core::{
     CameraSnapshot, ControlRequest, ControlResponse, Director, PipelineConfig,
     backend::Transport,
     config::{SrtConfig, SrtMode},
+    convert_legacy_yaml,
     vlm::VlmAdvice,
 };
 use aimedia_graph::{ExecutionPlan, compile as compile_plan};
@@ -95,6 +96,23 @@ enum Command {
         /// Return a non-zero status unless SRT, NVIDIA, and AAC libraries are all ready.
         #[arg(long)]
         strict: bool,
+    },
+    /// Inspect or migrate versioned media job configuration.
+    Config {
+        #[command(subcommand)]
+        action: ConfigAction,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum ConfigAction {
+    /// Convert a v1alpha1 DirectorPipeline into a v1alpha2 MediaJob.
+    Convert {
+        #[arg(short = 'f', long)]
+        file: PathBuf,
+        /// Write the converted YAML to this path instead of stdout.
+        #[arg(short, long)]
+        output: Option<PathBuf>,
     },
 }
 
@@ -234,7 +252,51 @@ async fn main() -> Result<()> {
         } => command_bench(&file, &capture, iterations),
         Command::Control { socket, action } => command_control(&socket, action).await,
         Command::Doctor { json, strict } => command_doctor(json, strict),
+        Command::Config { action } => command_config(action),
     }
+}
+
+fn command_config(action: ConfigAction) -> Result<()> {
+    match action {
+        ConfigAction::Convert { file, output } => {
+            let contents = fs::read_to_string(&file)
+                .with_context(|| format!("failed to read {}", file.display()))?;
+            let converted = convert_legacy_yaml(&contents)
+                .with_context(|| format!("failed to convert {}", file.display()))?;
+            if let Some(output) = output {
+                if same_path(&file, &output)? {
+                    bail!(
+                        "input and output paths must differ; write to a new file, verify it, then replace the legacy file explicitly"
+                    );
+                }
+                fs::write(&output, converted)
+                    .with_context(|| format!("failed to write {}", output.display()))?;
+                println!("converted MediaJob written to {}", output.display());
+            } else {
+                print!("{converted}");
+            }
+            Ok(())
+        }
+    }
+}
+
+fn same_path(left: &Path, right: &Path) -> Result<bool> {
+    let left = fs::canonicalize(left)
+        .with_context(|| format!("failed to resolve input path {}", left.display()))?;
+    let right = if right.exists() {
+        fs::canonicalize(right)
+            .with_context(|| format!("failed to resolve output path {}", right.display()))?
+    } else {
+        let parent = right
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
+        let parent = fs::canonicalize(parent)
+            .with_context(|| format!("failed to resolve output directory {}", parent.display()))?;
+        let file_name = right.file_name().context("output path must name a file")?;
+        parent.join(file_name)
+    };
+    Ok(left == right)
 }
 
 fn command_doctor(output_json: bool, strict: bool) -> Result<()> {

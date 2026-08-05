@@ -20,6 +20,20 @@ v0.2 固定 H.264 8-bit 4:2:0、最高 1080p30、AAC-LC 48kHz 双声道。固定
 
 不熟悉缩写时先看[术语表](glossary.md)，新架构见[架构说明](architecture.md)。
 
+`MediaJob` 顶层字段可以先按一张订单理解：
+
+| 字段 | 白话含义 | 当前作用 |
+|---|---|---|
+| `inputs` | 原料从哪里来 | 一到两路输入；v0.3 当前真实数据面只运行单路 |
+| `processing` | 原料要加工成什么样 | 视频、音频、时间对齐及可选切换策略 |
+| `outputs` | 成品送到哪里 | 配置已经使用列表；当前只允许一个输出，防止误以为 fan-out 已完成 |
+| `taps` | 给分析器看的非阻塞样本 | 当前仅保留 `directorSignals` 示例；通用 AI Tap 在 v0.4 |
+| `failurePolicy` | 某一步坏了怎么办 | 声明重连、偏差和非关键分析失败行为 |
+| `control` | 如何在本机查看和控制作业 | Unix Socket 路径和权限 |
+
+配置先归一化为内部作业，再由图编译器生成唯一的 `ExecutionPlan`。因此旧格式转换和
+新格式运行不会形成两套 socket、codec 或 GPU 管线。
+
 ## 2. 在 CPU 环境查看执行计划
 
 要求 Rust 1.85 或更新版本：
@@ -106,10 +120,20 @@ cargo run -p aimedia -- bench -f examples/director.yaml \
 
 ## 6. 常见问题
 
-### 配置仍然叫 DirectorPipeline
+### 旧配置提示必须转换
 
-这是 v0.1 配置适配层。新 `MediaJob` 配置会在执行计划接管真实单路链路后引入，避免
-现在同时维护两个未闭环运行时。
+`aimedia run` 和 `aimedia explain` 只接受 `aimedia/v1alpha2` 的 `MediaJob`。旧的
+`aimedia/v1alpha1` `DirectorPipeline` 不会被静默兼容，先显式转换并检查差异：
+
+```bash
+cargo run -p aimedia -- config convert \
+  -f examples/v1alpha1.yaml \
+  -o /tmp/media-job.yaml
+cargo run -p aimedia -- explain -f /tmp/media-job.yaml
+```
+
+不传 `-o` 时，新 YAML 输出到标准输出。转换后的 `outputs` 已经是列表结构，但 v0.3
+当前数据面仍只接受一个输出；多输出要等 v0.4 完成独立有界分支后才会开放。
 
 ### 配置提示包含敏感参数
 

@@ -1,5 +1,5 @@
-apiVersion: aimedia/v1alpha1
-kind: DirectorPipeline
+apiVersion: aimedia/v1alpha2
+kind: MediaJob
 metadata:
   name: two-camera-demo
 
@@ -35,21 +35,7 @@ inputs:
         maxBackoffMs: 5000
       keyLength: 16
 
-output:
-  uri: srt://127.0.0.1:10000
-  secretRef:
-    env: AIMEDIA_SRT_OUTPUT_PASSPHRASE
-  srt:
-    mode: caller
-    latencyMs: 120
-    connectTimeoutMs: 3000
-    reconnect:
-      enabled: true
-      initialBackoffMs: 250
-      maxBackoffMs: 5000
-    keyLength: 16
-
-media:
+processing:
   video:
     width: 1920
     height: 1080
@@ -62,37 +48,52 @@ media:
     sampleRate: 48000
     channels: 2
     bitrateKbps: 128
+  timing:
+    masterInput: 0
+    bufferMs: 1000
+    maxSkewMs: 80
+  switching:
+    policy:
+      minShotMs: 3000
+      scoreMargin: 0.15
+      candidateHoldMs: 800
+      cooldownMs: 2000
+    audio:
+      targetLufs: -16.0
+      crossfadeMs: 80
+      truePeakDbfs: -1.0
 
-sync:
-  masterInput: 0
-  bufferMs: 1000
-  maxSkewMs: 80
+outputs:
+  - name: program
+    uri: srt://127.0.0.1:10000
+    secretRef:
+      env: AIMEDIA_SRT_OUTPUT_PASSPHRASE
+    srt:
+      mode: caller
+      latencyMs: 120
+      connectTimeoutMs: 3000
+      reconnect:
+        enabled: true
+        initialBackoffMs: 250
+        maxBackoffMs: 5000
+      keyLength: 16
 
-fastAnalyzers:
-  vad: true
-  person: true
-  mouthMotion: true
-  quality: true
-
-vlmAdvisor:
-  mode: disabled
-  model: Qwen3-VL-2B-Instruct
-  intervalMs: 2000
-  deadlineMs: 800
-  validForMs: 3000
-  weight: 0.25
-  explicitPrivacyConsent: false
-
-directorPolicy:
-  minShotMs: 3000
-  scoreMargin: 0.15
-  candidateHoldMs: 800
-  cooldownMs: 2000
-
-audioSwitch:
-  targetLufs: -16.0
-  crossfadeMs: 80
-  truePeakDbfs: -1.0
+taps:
+  - name: director-signals
+    kind: directorSignals
+    fastAnalyzers:
+      vad: true
+      person: true
+      mouthMotion: true
+      quality: true
+    vlmAdvisor:
+      mode: disabled
+      model: Qwen3-VL-2B-Instruct
+      intervalMs: 2000
+      deadlineMs: 800
+      validForMs: 3000
+      weight: 0.25
+      explicitPrivacyConsent: false
 
 failurePolicy:
   failoverOnDisconnect: true

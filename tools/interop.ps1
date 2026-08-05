@@ -193,8 +193,8 @@ function Write-JobConfig {
         "srt://0.0.0.0:$OutputPort"
     }
     $config = @"
-apiVersion: aimedia/v1alpha1
-kind: DirectorPipeline
+apiVersion: aimedia/v1alpha2
+kind: MediaJob
 metadata:
   name: interop-$InputMode-$OutputMode
 inputs:
@@ -209,17 +209,7 @@ inputs:
         enabled: true
         initialBackoffMs: 250
         maxBackoffMs: 1000
-output:
-  uri: $outputUri
-  srt:
-    mode: $OutputMode
-    latencyMs: 120
-    connectTimeoutMs: 10000
-    reconnect:
-      enabled: true
-      initialBackoffMs: 250
-      maxBackoffMs: 1000
-media:
+processing:
   video:
     width: 1280
     height: 720
@@ -232,10 +222,22 @@ media:
     sampleRate: 48000
     channels: 2
     bitrateKbps: 128
-sync:
-  masterInput: 0
-  bufferMs: 1000
-  maxSkewMs: 80
+  timing:
+    masterInput: 0
+    bufferMs: 1000
+    maxSkewMs: 80
+outputs:
+  - name: program
+    uri: $outputUri
+    srt:
+      mode: $OutputMode
+      latencyMs: 120
+      connectTimeoutMs: 10000
+      reconnect:
+        enabled: true
+        initialBackoffMs: 250
+        maxBackoffMs: 1000
+taps: []
 control:
   socketPath: /run/aimedia/aimedia.sock
   socketMode: "0660"

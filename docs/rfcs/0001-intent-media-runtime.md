@@ -81,9 +81,10 @@ Cargo 包名继续使用 `aimedia-*`，因为包名会出现在 workspace 外部
 
 ## 配置迁移
 
-v0.1 的 `DirectorPipeline` 配置暂时继续解析，作为图编译器的输入适配层。下一版配置
-将采用 `MediaJob`，把字段整理为 `inputs`、`processing`、`outputs`、`taps` 和
-`failurePolicy`。在新执行器接管真实单路链路前，不同时维护两套运行时。
+`aimedia/v1alpha2` 采用 `MediaJob`，把字段整理为 `inputs`、`processing`、`outputs`、
+`taps` 和 `failurePolicy`。v0.1 的 `DirectorPipeline` 不再进入运行时；一次性迁移通过
+`aimedia config convert` 显式完成。两种外部文档最终都归一化为同一个内部配置和
+`ExecutionPlan`，因此没有两套运行时。
 
 ## 分阶段迁移
 

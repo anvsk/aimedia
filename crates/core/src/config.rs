@@ -7,8 +7,10 @@ use std::{
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-pub const API_VERSION: &str = "aimedia/v1alpha1";
-pub const KIND: &str = "DirectorPipeline";
+pub const API_VERSION: &str = "aimedia/v1alpha2";
+pub const KIND: &str = "MediaJob";
+pub const LEGACY_API_VERSION: &str = "aimedia/v1alpha1";
+pub const LEGACY_KIND: &str = "DirectorPipeline";
 
 #[derive(Debug, Error)]
 pub enum ConfigError {
@@ -18,9 +20,13 @@ pub enum ConfigError {
     Yaml(#[from] serde_yaml::Error),
     #[error("configuration validation failed: {0:?}")]
     Validation(Vec<String>),
+    #[error(
+        "legacy DirectorPipeline configuration is not accepted by run/explain; convert it with `aimedia config convert -f <legacy.yaml>`"
+    )]
+    LegacyRequiresConversion,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PipelineConfig {
     pub api_version: String,
@@ -53,7 +59,12 @@ impl PipelineConfig {
     }
 
     pub fn from_yaml(contents: &str) -> Result<Self, ConfigError> {
-        let config: Self = serde_yaml::from_str(contents)?;
+        let header: ConfigHeader = serde_yaml::from_str(contents)?;
+        if header.api_version == LEGACY_API_VERSION && header.kind == LEGACY_KIND {
+            return Err(ConfigError::LegacyRequiresConversion);
+        }
+        let job: MediaJob = serde_yaml::from_str(contents)?;
+        let config = job.into_pipeline_config()?;
         config.validate()?;
         Ok(config)
     }
@@ -75,13 +86,13 @@ impl PipelineConfig {
         }
         if !(1..=2).contains(&self.inputs.len()) {
             errors.push(format!(
-                "one or two inputs are required for v1alpha1, got {}",
+                "one or two inputs are required for v1alpha2, got {}",
                 self.inputs.len()
             ));
         }
         if self.sync.master_input >= self.inputs.len() {
             errors.push(format!(
-                "sync.masterInput must reference a configured input, got {} for {} inputs",
+                "processing.timing.masterInput must reference a configured input, got {} for {} inputs",
                 self.sync.master_input,
                 self.inputs.len()
             ));
@@ -103,61 +114,65 @@ impl PipelineConfig {
             validate_srt(&input.srt, &format!("{prefix}.srt"), &mut errors);
         }
 
-        validate_srt_uri(&self.output.uri, "output.uri", &mut errors);
-        validate_secret_ref(self.output.secret_ref.as_ref(), "output", &mut errors);
-        validate_srt(&self.output.srt, "output.srt", &mut errors);
+        validate_srt_uri(&self.output.uri, "outputs[0].uri", &mut errors);
+        validate_secret_ref(self.output.secret_ref.as_ref(), "outputs[0]", &mut errors);
+        validate_srt(&self.output.srt, "outputs[0].srt", &mut errors);
 
         let video = &self.media.video;
         if video.width == 0 || video.width > 1920 {
-            errors.push("media.video.width must be in 1..=1920".to_owned());
+            errors.push("processing.video.width must be in 1..=1920".to_owned());
         }
         if video.height == 0 || video.height > 1080 {
-            errors.push("media.video.height must be in 1..=1080".to_owned());
+            errors.push("processing.video.height must be in 1..=1080".to_owned());
         }
         if video.fps == 0 || video.fps > 30 {
-            errors.push("media.video.fps must be in 1..=30 for the alpha profile".to_owned());
+            errors.push("processing.video.fps must be in 1..=30 for the alpha profile".to_owned());
         }
         if video.gop_ms < 250 || video.gop_ms > 10_000 {
-            errors.push("media.video.gopMs must be between 250 and 10000".to_owned());
+            errors.push("processing.video.gopMs must be between 250 and 10000".to_owned());
         }
         if !video.profile.eq_ignore_ascii_case("main") {
-            errors.push("media.video.profile must be main for v1alpha1".to_owned());
+            errors.push("processing.video.profile must be main for v1alpha2".to_owned());
         }
         if video.b_frames != 0 {
-            errors
-                .push("media.video.bFrames must be 0 for the low-latency alpha profile".to_owned());
+            errors.push(
+                "processing.video.bFrames must be 0 for the low-latency alpha profile".to_owned(),
+            );
         }
 
         let audio = &self.media.audio;
         if audio.sample_rate != 48_000 {
-            errors.push("media.audio.sampleRate must be 48000 for v1alpha1".to_owned());
+            errors.push("processing.audio.sampleRate must be 48000 for v1alpha2".to_owned());
         }
         if audio.channels != 2 {
-            errors.push("media.audio.channels must be 2 for v1alpha1".to_owned());
+            errors.push("processing.audio.channels must be 2 for v1alpha2".to_owned());
         }
 
         if self.sync.buffer_ms < 100 || self.sync.buffer_ms > 5_000 {
-            errors.push("sync.bufferMs must be between 100 and 5000".to_owned());
+            errors.push("processing.timing.bufferMs must be between 100 and 5000".to_owned());
         }
         if self.sync.max_skew_ms == 0 || self.sync.max_skew_ms > self.sync.buffer_ms {
-            errors.push("sync.maxSkewMs must be in 1..=sync.bufferMs".to_owned());
+            errors.push(
+                "processing.timing.maxSkewMs must be in 1..=processing.timing.bufferMs".to_owned(),
+            );
         }
 
         let policy = &self.director_policy;
         if !(0.0..=1.0).contains(&policy.score_margin) {
-            errors.push("directorPolicy.scoreMargin must be between 0 and 1".to_owned());
+            errors
+                .push("processing.switching.policy.scoreMargin must be between 0 and 1".to_owned());
         }
         if policy.min_shot_ms < policy.candidate_hold_ms {
             errors.push(
-                "directorPolicy.minShotMs must be greater than or equal to candidateHoldMs"
+                "processing.switching.policy.minShotMs must be greater than or equal to candidateHoldMs"
                     .to_owned(),
             );
         }
         if self.vlm_advisor.weight > 0.25 {
-            errors.push("vlmAdvisor.weight must not exceed 0.25".to_owned());
+            errors.push("taps[0].vlmAdvisor.weight must not exceed 0.25".to_owned());
         }
         if self.vlm_advisor.valid_for_ms > 3_000 {
-            errors.push("vlmAdvisor.validForMs must not exceed 3000".to_owned());
+            errors.push("taps[0].vlmAdvisor.validForMs must not exceed 3000".to_owned());
         }
         match self.vlm_advisor.mode {
             VlmMode::Disabled => {}
@@ -169,7 +184,7 @@ impl PipelineConfig {
                     .unwrap_or("")
                     .is_empty()
                 {
-                    errors.push("vlmAdvisor.endpoint is required in local mode".to_owned());
+                    errors.push("taps[0].vlmAdvisor.endpoint is required in local mode".to_owned());
                 }
             }
             VlmMode::Remote => {
@@ -180,11 +195,13 @@ impl PipelineConfig {
                     .unwrap_or("")
                     .is_empty()
                 {
-                    errors.push("vlmAdvisor.endpoint is required in remote mode".to_owned());
+                    errors
+                        .push("taps[0].vlmAdvisor.endpoint is required in remote mode".to_owned());
                 }
                 if !self.vlm_advisor.explicit_privacy_consent {
                     errors.push(
-                        "vlmAdvisor.explicitPrivacyConsent must be true in remote mode".to_owned(),
+                        "taps[0].vlmAdvisor.explicitPrivacyConsent must be true in remote mode"
+                            .to_owned(),
                     );
                 }
                 if self
@@ -194,19 +211,24 @@ impl PipelineConfig {
                     .unwrap_or("")
                     .is_empty()
                 {
-                    errors.push("vlmAdvisor.tokenEnv is required in remote mode".to_owned());
+                    errors
+                        .push("taps[0].vlmAdvisor.tokenEnv is required in remote mode".to_owned());
                 }
             }
         }
 
         if self.audio_switch.crossfade_ms == 0 || self.audio_switch.crossfade_ms > 500 {
-            errors.push("audioSwitch.crossfadeMs must be in 1..=500".to_owned());
+            errors.push("processing.switching.audio.crossfadeMs must be in 1..=500".to_owned());
         }
         if !(-30.0..=-8.0).contains(&self.audio_switch.target_lufs) {
-            errors.push("audioSwitch.targetLufs must be between -30 and -8".to_owned());
+            errors.push(
+                "processing.switching.audio.targetLufs must be between -30 and -8".to_owned(),
+            );
         }
         if !(-12.0..=0.0).contains(&self.audio_switch.true_peak_dbfs) {
-            errors.push("audioSwitch.truePeakDbfs must be between -12 and 0".to_owned());
+            errors.push(
+                "processing.switching.audio.truePeakDbfs must be between -12 and 0".to_owned(),
+            );
         }
 
         if self.control.socket_path.as_os_str().is_empty() {
@@ -223,6 +245,277 @@ impl PipelineConfig {
             Err(ConfigError::Validation(errors))
         }
     }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ConfigHeader {
+    api_version: String,
+    kind: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MediaJob {
+    pub api_version: String,
+    pub kind: String,
+    pub metadata: Metadata,
+    pub inputs: Vec<InputConfig>,
+    #[serde(default)]
+    pub processing: ProcessingConfig,
+    pub outputs: Vec<JobOutputConfig>,
+    #[serde(default)]
+    pub taps: Vec<TapConfig>,
+    #[serde(default)]
+    pub failure_policy: FailurePolicyConfig,
+    #[serde(default)]
+    pub control: ControlConfig,
+}
+
+impl MediaJob {
+    fn into_pipeline_config(self) -> Result<PipelineConfig, ConfigError> {
+        let mut errors = Vec::new();
+        if self.api_version != API_VERSION {
+            errors.push(format!(
+                "apiVersion must be {API_VERSION:?}, got {:?}",
+                self.api_version
+            ));
+        }
+        if self.kind != KIND {
+            errors.push(format!("kind must be {KIND:?}, got {:?}", self.kind));
+        }
+        if self.outputs.len() != 1 {
+            errors.push(format!(
+                "exactly one output is supported in v0.3, got {}; multi-output is scheduled for v0.4",
+                self.outputs.len()
+            ));
+        }
+
+        let mut output_names = HashSet::new();
+        for (index, output) in self.outputs.iter().enumerate() {
+            if output.name.trim().is_empty() {
+                errors.push(format!("outputs[{index}].name must not be empty"));
+            } else if !output_names.insert(output.name.as_str()) {
+                errors.push(format!(
+                    "outputs[{index}].name {:?} is duplicated",
+                    output.name
+                ));
+            }
+        }
+
+        if self.taps.len() > 1 {
+            errors.push(
+                "at most one directorSignals tap is supported in v0.3; general analyzer taps are scheduled for v0.4"
+                    .to_owned(),
+            );
+        }
+        let mut tap_names = HashSet::new();
+        for (index, tap) in self.taps.iter().enumerate() {
+            if tap.name.trim().is_empty() {
+                errors.push(format!("taps[{index}].name must not be empty"));
+            } else if !tap_names.insert(tap.name.as_str()) {
+                errors.push(format!("taps[{index}].name {:?} is duplicated", tap.name));
+            }
+        }
+
+        if !errors.is_empty() {
+            return Err(ConfigError::Validation(errors));
+        }
+
+        let output = self
+            .outputs
+            .into_iter()
+            .next()
+            .expect("output count was validated");
+        let tap = self.taps.into_iter().next();
+        let (fast_analyzers, vlm_advisor) = tap.map_or_else(
+            || (FastAnalyzersConfig::disabled(), VlmAdvisorConfig::default()),
+            |tap| (tap.fast_analyzers, tap.vlm_advisor),
+        );
+
+        Ok(PipelineConfig {
+            api_version: API_VERSION.to_owned(),
+            kind: KIND.to_owned(),
+            metadata: self.metadata,
+            inputs: self.inputs,
+            output: output.into(),
+            media: MediaConfig {
+                video: self.processing.video,
+                audio: self.processing.audio,
+            },
+            sync: self.processing.timing,
+            fast_analyzers,
+            vlm_advisor,
+            director_policy: self.processing.switching.policy,
+            audio_switch: self.processing.switching.audio,
+            failure_policy: self.failure_policy,
+            control: self.control,
+        })
+    }
+
+    fn from_pipeline_config(config: PipelineConfig) -> Self {
+        Self {
+            api_version: API_VERSION.to_owned(),
+            kind: KIND.to_owned(),
+            metadata: config.metadata,
+            inputs: config.inputs,
+            processing: ProcessingConfig {
+                video: config.media.video,
+                audio: config.media.audio,
+                timing: config.sync,
+                switching: SwitchingConfig {
+                    policy: config.director_policy,
+                    audio: config.audio_switch,
+                },
+            },
+            outputs: vec![JobOutputConfig {
+                name: "program".to_owned(),
+                uri: config.output.uri,
+                secret_ref: config.output.secret_ref,
+                srt: config.output.srt,
+            }],
+            taps: vec![TapConfig {
+                name: "director-signals".to_owned(),
+                kind: TapKind::DirectorSignals,
+                fast_analyzers: config.fast_analyzers,
+                vlm_advisor: config.vlm_advisor,
+            }],
+            failure_policy: config.failure_policy,
+            control: config.control,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProcessingConfig {
+    #[serde(default)]
+    pub video: VideoConfig,
+    #[serde(default)]
+    pub audio: AudioConfig,
+    #[serde(default)]
+    pub timing: SyncConfig,
+    #[serde(default)]
+    pub switching: SwitchingConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SwitchingConfig {
+    #[serde(default)]
+    pub policy: DirectorPolicyConfig,
+    #[serde(default)]
+    pub audio: AudioSwitchConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct JobOutputConfig {
+    pub name: String,
+    pub uri: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secret_ref: Option<SecretRef>,
+    #[serde(default)]
+    pub srt: SrtConfig,
+}
+
+impl From<JobOutputConfig> for OutputConfig {
+    fn from(output: JobOutputConfig) -> Self {
+        Self {
+            uri: output.uri,
+            secret_ref: output.secret_ref,
+            srt: output.srt,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TapConfig {
+    pub name: String,
+    pub kind: TapKind,
+    #[serde(default)]
+    pub fast_analyzers: FastAnalyzersConfig,
+    #[serde(default)]
+    pub vlm_advisor: VlmAdvisorConfig,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TapKind {
+    DirectorSignals,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct LegacyPipelineConfig {
+    api_version: String,
+    kind: String,
+    metadata: Metadata,
+    inputs: Vec<InputConfig>,
+    output: OutputConfig,
+    #[serde(default)]
+    media: MediaConfig,
+    #[serde(default)]
+    sync: SyncConfig,
+    #[serde(default)]
+    fast_analyzers: FastAnalyzersConfig,
+    #[serde(default)]
+    vlm_advisor: VlmAdvisorConfig,
+    #[serde(default)]
+    director_policy: DirectorPolicyConfig,
+    #[serde(default)]
+    audio_switch: AudioSwitchConfig,
+    #[serde(default)]
+    failure_policy: FailurePolicyConfig,
+    #[serde(default)]
+    control: ControlConfig,
+}
+
+impl LegacyPipelineConfig {
+    fn into_pipeline_config(self) -> Result<PipelineConfig, ConfigError> {
+        let mut errors = Vec::new();
+        if self.api_version != LEGACY_API_VERSION {
+            errors.push(format!(
+                "legacy apiVersion must be {LEGACY_API_VERSION:?}, got {:?}",
+                self.api_version
+            ));
+        }
+        if self.kind != LEGACY_KIND {
+            errors.push(format!(
+                "legacy kind must be {LEGACY_KIND:?}, got {:?}",
+                self.kind
+            ));
+        }
+        if !errors.is_empty() {
+            return Err(ConfigError::Validation(errors));
+        }
+
+        let config = PipelineConfig {
+            api_version: API_VERSION.to_owned(),
+            kind: KIND.to_owned(),
+            metadata: self.metadata,
+            inputs: self.inputs,
+            output: self.output,
+            media: self.media,
+            sync: self.sync,
+            fast_analyzers: self.fast_analyzers,
+            vlm_advisor: self.vlm_advisor,
+            director_policy: self.director_policy,
+            audio_switch: self.audio_switch,
+            failure_policy: self.failure_policy,
+            control: self.control,
+        };
+        config.validate()?;
+        Ok(config)
+    }
+}
+
+pub fn convert_legacy_yaml(contents: &str) -> Result<String, ConfigError> {
+    let legacy: LegacyPipelineConfig = serde_yaml::from_str(contents)?;
+    let config = legacy.into_pipeline_config()?;
+    let job = MediaJob::from_pipeline_config(config);
+    Ok(serde_yaml::to_string(&job)?)
 }
 
 fn validate_srt(config: &SrtConfig, path: &str, errors: &mut Vec<String>) {
@@ -335,7 +628,7 @@ pub struct InputConfig {
     pub uri: String,
     #[serde(default)]
     pub offset_ms: i64,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub secret_ref: Option<SecretRef>,
     #[serde(default)]
     pub srt: SrtConfig,
@@ -354,7 +647,7 @@ pub enum CameraRole {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct OutputConfig {
     pub uri: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub secret_ref: Option<SecretRef>,
     #[serde(default)]
     pub srt: SrtConfig,
@@ -363,9 +656,9 @@ pub struct OutputConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SecretRef {
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub env: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub file: Option<std::path::PathBuf>,
 }
 
@@ -398,7 +691,7 @@ pub enum SecretError {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SrtConfig {
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mode: Option<SrtMode>,
     #[serde(default = "default_srt_latency")]
     pub latency_ms: u64,
@@ -406,9 +699,9 @@ pub struct SrtConfig {
     pub connect_timeout_ms: u64,
     #[serde(default)]
     pub reconnect: ReconnectConfig,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stream_id: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stream_id_ref: Option<SecretRef>,
     #[serde(default = "default_srt_key_length")]
     pub key_length: u16,
@@ -681,6 +974,17 @@ impl Default for FastAnalyzersConfig {
     }
 }
 
+impl FastAnalyzersConfig {
+    fn disabled() -> Self {
+        Self {
+            vad: false,
+            person: false,
+            mouth_motion: false,
+            quality: false,
+        }
+    }
+}
+
 const fn default_true() -> bool {
     true
 }
@@ -690,7 +994,7 @@ const fn default_true() -> bool {
 pub struct VlmAdvisorConfig {
     #[serde(default)]
     pub mode: VlmMode,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub endpoint: Option<String>,
     #[serde(default = "default_vlm_model")]
     pub model: String,
@@ -702,7 +1006,7 @@ pub struct VlmAdvisorConfig {
     pub valid_for_ms: u64,
     #[serde(default = "default_vlm_weight")]
     pub weight: f32,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub token_env: Option<String>,
     #[serde(default)]
     pub explicit_privacy_consent: bool,
@@ -840,7 +1144,7 @@ impl Default for FailurePolicyConfig {
 
 #[cfg(test)]
 mod tests {
-    use super::{PipelineConfig, validate_srt_uri};
+    use super::{ConfigError, PipelineConfig, convert_legacy_yaml, validate_srt_uri};
 
     #[test]
     fn accepts_the_reference_alpha_configuration() {
@@ -849,6 +1153,7 @@ mod tests {
         assert_eq!(config.inputs.len(), 2);
         assert_eq!(config.sync.max_skew_ms, 80);
         assert_eq!(config.media.video.gop_ms, 1_000);
+        assert!(config.fast_analyzers.vad);
     }
 
     #[test]
@@ -856,9 +1161,44 @@ mod tests {
         let yaml = include_str!("../../../examples/single-srt.yaml");
         let config = PipelineConfig::from_yaml(yaml).expect("single-input configuration is valid");
         assert_eq!(config.inputs.len(), 1);
+        assert!(!config.fast_analyzers.vad);
 
         let invalid = yaml.replace("masterInput: 0", "masterInput: 1");
-        assert!(PipelineConfig::from_yaml(&invalid).is_err());
+        let error = PipelineConfig::from_yaml(&invalid).expect_err("missing master is rejected");
+        assert!(error.to_string().contains("processing.timing.masterInput"));
+    }
+
+    #[test]
+    fn legacy_configuration_requires_explicit_conversion() {
+        let legacy = include_str!("../../../examples/v1alpha1.yaml");
+        assert!(matches!(
+            PipelineConfig::from_yaml(legacy),
+            Err(ConfigError::LegacyRequiresConversion)
+        ));
+
+        let converted = convert_legacy_yaml(legacy).expect("legacy configuration converts");
+        assert!(converted.contains("apiVersion: aimedia/v1alpha2"));
+        assert!(converted.contains("kind: MediaJob"));
+        assert!(converted.contains("outputs:"));
+        let config = PipelineConfig::from_yaml(&converted).expect("converted MediaJob is valid");
+        assert_eq!(config.metadata.name, "legacy-single-srt");
+        assert_eq!(config.inputs[0].name, "program");
+        assert_eq!(config.output.uri, "srt://127.0.0.1:10000");
+    }
+
+    #[test]
+    fn rejects_multiple_outputs_until_fanout_is_implemented() {
+        let yaml = include_str!("../../../examples/single-srt.yaml");
+        let invalid = yaml.replace(
+            "taps: []",
+            "  - name: backup\n    uri: srt://127.0.0.1:10001\n\ntaps: []",
+        );
+        let error = PipelineConfig::from_yaml(&invalid).expect_err("fan-out must be rejected");
+        assert!(
+            error
+                .to_string()
+                .contains("multi-output is scheduled for v0.4")
+        );
     }
 
     #[test]

@@ -8,7 +8,9 @@
 
 ## 自主执行规则
 
-1. 始终只推进当前最早未完成的大阶段，不因新协议更有趣而跳过发布门槛。
+1. 始终推进当前最早且前置条件已具备的工程切片，不因新协议更有趣而跳过技术、兼容
+   或发布门槛。社区帖子若因账号资格或审核暂未公开，继续单独追踪且不得伪装完成，
+   但在代码、验证和 Release 已完成后不阻塞下一阶段工程。
 2. 每个技术切片从最新 `main` 创建功能分支，通过独立 PR、CI 和 code review 合并。
 3. 完成切片的同一个 PR 更新本路线图，写明 PR、测试或兼容证据。
 4. 小切片不要求用户逐次确认；只有许可证、外部账号、产品取舍或破坏性操作才暂停询问。
@@ -23,8 +25,8 @@
 |---|---|---|---|
 | v0.1 Foundation | ✅ 完成 | 可测试的媒体基础、fake runtime 和 native adapter | 已进入公开仓库；不宣称真实直播闭环 |
 | Architecture Reset | ✅ 完成 | 通用媒体作业定位、类型化执行图、导播降为可选策略 | PR [#10](https://github.com/anvsk/aimedia/pull/10)；属于内部架构切片，不单独广告 |
-| v0.2 Native Live Pipe | 🚧 进行中 | 一路 SRT 真正原生转码后输出 SRT | tag `v0.2-native-live-pipe`；首轮新定位社区发布 |
-| v0.3 Normalize & Bridge | ⏳ 未开始 | RTSP/SRT/RTMP 输入归一化并发布 SRT/RTMPS | tag `v0.3-normalize-bridge`；中外平台实测帖 |
+| v0.2 Native Live Pipe | 🟨 工程与发布完成，社区待公开 | 一路 SRT 真正原生转码后输出 SRT | tag `v0.2-native-live-pipe` 已发布；V2-11 继续追踪 |
+| v0.3 Normalize & Bridge | 🚧 进行中 | RTSP/SRT/RTMP 输入归一化并发布 SRT/RTMPS | tag `v0.3-normalize-bridge`；中外平台实测帖 |
 | v0.4 Fan-out & AI Tap | ⏳ 未开始 | 一次解码、多路输出、AI 非阻塞接入 | tag `v0.4-ai-tap`；AI SDK 示例发布 |
 | v0.5 Media Job Service | ⏳ 未开始 | API 管理多作业及 GPU 资源 | tag `v0.5-job-service`；部署与运维案例 |
 | v0.6 Regional Profiles | ⏳ 未开始 | 中国大陆与海外主流工作流预设 | 分区域兼容报告，不做未验证平台广告 |
@@ -119,20 +121,27 @@
   首轮结果见[社区发布记录](community-feedback.md)：r/rust 已生成帖子但未进入 `/new`，
   Hacker News 在创建 story 前触发 Show HN 新用户限制；当前无真实反馈，因此保持未完成。
 
-只有 V2-01 至 V2-11 全部完成，v0.2 才能标记完成。
+V2-01 至 V2-10 构成 v0.2 工程与 Release 门槛，已经完成。V2-11 仍是必须履行的公开
+传播义务，但它依赖社区审核和账号资格；保持未完成并定期复查，不再让它无限阻塞
+v0.3 工程。只有 V2-11 也完成后，总览才把 v0.2 标记为完全完成。
 
 ## v0.3 Normalize & Bridge
 
 用户故事：直播后端开发者把现场 RTSP/SRT/RTMP 输入归一化后发布到国内外平台。
 
-- [ ] `MediaJob` v2 配置取代 `DirectorPipeline` 适配层，提供显式转换命令。
-- [ ] RTSP/RTP 输入：H.264/H.265 视频及 AAC/G.711 音频。
-- [ ] RTMP/RTMPS 输入输出与 FLV demux/mux。
-- [ ] H.265 输入转 H.264 输出。
-- [ ] 720p/1080p、25/30/50/60fps、横竖屏、44.1/48kHz 和单/双声道归一化。
-- [ ] 腾讯云、阿里云、YouTube 非公开直播和 Twitch bandwidth test 真实验证。
-- [ ] 分阶段 DNS/TLS/鉴权/格式错误，敏感信息不进入日志。
-- [ ] 两小时跨协议 soak、支持矩阵、版本 Release 和社区兼容报告。
+- [x] **V3-01 MediaJob v2 配置**：取代 `DirectorPipeline` 运行时适配层，提供显式转换
+  命令；单输出和 director tap 先使用未来列表结构，但未实现的数据面能力会明确拒绝。
+  证据：PR [#23](https://github.com/anvsk/aimedia/pull/23)，workspace tests、严格 Clippy、
+  Docker explain/conversion smoke、NVIDIA SDK ABI build/test 和更新后验收脚本语法检查。
+- [ ] **V3-02 RTSP/RTP 输入**：H.264/H.265 视频及 AAC/G.711 音频。
+- [ ] **V3-03 RTMP/RTMPS 与 FLV**：输入、输出、FLV demux/mux。
+- [ ] **V3-04 HEVC Bridge**：H.265 输入转 H.264 输出。
+- [ ] **V3-05 格式归一化**：720p/1080p、25/30/50/60fps、横竖屏、44.1/48kHz
+  和单/双声道。
+- [ ] **V3-06 平台互操作**：腾讯云、阿里云、YouTube 非公开直播和 Twitch bandwidth
+  test 真实验证。
+- [ ] **V3-07 可诊断连接**：分阶段 DNS/TLS/鉴权/格式错误，敏感信息不进入日志。
+- [ ] **V3-08 发布**：两小时跨协议 soak、支持矩阵、版本 Release 和社区兼容报告。
 
 ## v0.4 Fan-out & AI Tap
 
