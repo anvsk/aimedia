@@ -13,7 +13,7 @@ dependencies = [
 
 [[package]]
 name = "aimedia"
-version = "0.1.0-alpha.1"
+version = "0.2.0-alpha.1"
 dependencies = [
  "aimedia-aac",
  "aimedia-core",
@@ -34,7 +34,7 @@ dependencies = [
 
 [[package]]
 name = "aimedia-aac"
-version = "0.1.0-alpha.1"
+version = "0.2.0-alpha.1"
 dependencies = [
  "aimedia-core",
  "aimedia-mpegts",
@@ -48,7 +48,7 @@ dependencies = [
 
 [[package]]
 name = "aimedia-core"
-version = "0.1.0-alpha.1"
+version = "0.2.0-alpha.1"
 dependencies = [
  "async-trait",
  "bytes",
@@ -63,7 +63,7 @@ dependencies = [
 
 [[package]]
 name = "aimedia-graph"
-version = "0.1.0-alpha.1"
+version = "0.2.0-alpha.1"
 dependencies = [
  "aimedia-core",
  "serde",
@@ -72,7 +72,7 @@ dependencies = [
 
 [[package]]
 name = "aimedia-mpegts"
-version = "0.1.0-alpha.1"
+version = "0.2.0-alpha.1"
 dependencies = [
  "bytes",
  "serde",
@@ -81,7 +81,7 @@ dependencies = [
 
 [[package]]
 name = "aimedia-nvidia"
-version = "0.1.0-alpha.1"
+version = "0.2.0-alpha.1"
 dependencies = [
  "aimedia-core",
  "async-trait",
@@ -97,7 +97,7 @@ dependencies = [
 
 [[package]]
 name = "aimedia-runtime"
-version = "0.1.0-alpha.1"
+version = "0.2.0-alpha.1"
 dependencies = [
  "aimedia-core",
  "aimedia-graph",
@@ -112,7 +112,7 @@ dependencies = [
 
 [[package]]
 name = "aimedia-srt"
-version = "0.1.0-alpha.1"
+version = "0.2.0-alpha.1"
 dependencies = [
  "aimedia-core",
  "async-trait",

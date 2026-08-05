@@ -137,8 +137,8 @@ pwsh ./tools/interop.ps1 `
 ```
 
 该场景先建立 caller input 并延迟 4 秒连接 output listener，要求视频时间线报告
-`capacity=1`、`fullPolicy=keepLatest`，至少替换一个过期帧，且 NVDEC surface 高水位
-不超过容量。最终输出仍必须从 IDR 开始且 PTS/DTS 单调。
+`capacity=1`、`fullPolicy=backpressure`，视频零丢帧，且 NVDEC surface 高水位不超过
+容量。最终输出仍必须从 IDR 开始且 PTS/DTS 单调。
 
 首个组合会在引擎、发送端和接收端的网络命名空间各注入 20ms 延迟、
 20ms 抖动和 1% 丢包，形成约 40ms RTT 的双向损伤链路；它需要测试容器的
