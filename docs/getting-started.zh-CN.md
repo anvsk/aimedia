@@ -1,7 +1,8 @@
 # 快速入门
 
 当前版本可以在 CPU 环境校验配置、编译执行图、运行 fake backend 和检查 native
-依赖。真实 NVDEC/NVENC 数据面尚未闭环；每项能力以[支持矩阵](support-matrix.md)为准。
+依赖；Linux + NVIDIA 环境已经闭环单路 NVDEC/NVENC 数据面。每项能力仍以
+[支持矩阵](support-matrix.md)为准。
 
 ## 1. 先理解当前作业
 
@@ -87,9 +88,10 @@ docker run --rm --gpus all \
   aimedia:gpu run -f /work/single-srt.yaml
 ```
 
-启动前要先准备与配置 caller/listener 方向匹配的 SRT 发送端和接收端。当前真实数据面
-仍是 experimental：断流保活和输出恢复已完成真实 GPU 故障实验，但广泛互操作、
-网络损伤和两小时稳定性测试尚未完成。
+启动前要先准备与配置 caller/listener 方向匹配的 SRT 发送端和接收端。真实数据面已
+完成断流恢复、FFmpeg/OBS/VLC 互操作、网络损伤和两小时稳定性测试；在 v0.2 Release
+创建前仍标记为 experimental。精确环境与数字见
+[v0.2 性能报告](reports/v0.2-native-live-pipe.md)。
 
 ## 5. 可选导播示例
 

@@ -16,8 +16,8 @@ pub mod vlm;
 pub use config::{ConfigError, PipelineConfig};
 pub use control::{
     ControlCommand, ControlErrorCode, ControlRequest, ControlResponse, GpuSurfaceRuntimeStats,
-    InputCodecRuntimeStats, InputRuntimeState, OutputRuntimeState, PipelineMode,
-    PipelineRuntimeState, QueueRuntimeState, SrtRuntimeStats,
+    InputCodecRuntimeStats, InputRuntimeState, LatencyRuntimeStats, OutputRuntimeState,
+    PipelineMode, PipelineRuntimeState, QueueRuntimeState, SrtRuntimeStats,
 };
 pub use director::{
     CameraSnapshot, Director, DirectorDecision, DirectorEvent, FastSignals, SwitchReason,

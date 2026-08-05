@@ -261,11 +261,21 @@ pub struct GpuSurfaceRuntimeStats {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct LatencyRuntimeStats {
+    pub samples: u64,
+    pub p50_ms: u64,
+    pub p95_ms: u64,
+    pub max_ms: u64,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct OutputRuntimeState {
     pub video_encoded_frames: u64,
     pub audio_encoded_frames: u64,
     pub video_dropped_frames: u64,
     pub audio_dropped_frames: u64,
+    pub engine_latency: LatencyRuntimeStats,
     pub srt: SrtRuntimeStats,
 }
 

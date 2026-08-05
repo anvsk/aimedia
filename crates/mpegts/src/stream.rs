@@ -57,6 +57,7 @@ pub struct ProgramMap {
 pub enum DemuxEvent {
     ProgramMap(ProgramMap),
     Packet(ElementaryPacket),
+    ClockReference { pid: u16, pcr_27mhz: u64 },
     ContinuityError { pid: u16, expected: u8, actual: u8 },
     Discontinuity { pid: u16 },
     SyncRecovered { discarded_bytes: usize },
@@ -340,6 +341,13 @@ impl StreamDemuxer {
             self.pending_discontinuity.insert(pid, true);
             events.push(DemuxEvent::Discontinuity { pid });
             return Ok(());
+        }
+
+        if let Some(pcr_27mhz) = packet
+            .adaptation
+            .and_then(|adaptation| adaptation.pcr_27mhz)
+        {
+            events.push(DemuxEvent::ClockReference { pid, pcr_27mhz });
         }
 
         let discontinuity = packet

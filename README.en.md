@@ -28,8 +28,9 @@ Frame-level NVDEC/NVENC and the production single-SRT GPU loop now run end to en
 the last healthy frame with silent audio; SRT recovery resets the affected timeline, while output
 recovery drops stale packets, emits fresh PAT/PMT, and requests an IDR. Runtime state now reports
 every execution-plan edge, codec counters, NVDEC surface leases, and live input/output SRT stats.
-Broader interoperability, network impairment, and soak gates are still pending, so the data plane
-remains experimental.
+The native single-SRT GPU data plane has passed FFmpeg/OBS/VLC interoperability, network
+impairment, disconnect recovery, and a 1080p30 two-hour soak. It remains experimental until the
+v0.2 release is published. See the Chinese performance report and support matrix for exact scope.
 
 ```bash
 cargo run -p aimedia -- explain -f examples/single-srt.yaml
