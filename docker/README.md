@@ -87,3 +87,59 @@ GPU 运行镜像将 libsrt 与 libxaac 的许可证和 NOTICE 安装到
 caller 断开后按配置重建 socket，重连期间统计保持可读，第二个 caller 的消息到达后
 `reconnects` 才递增。发送端 adapter 不维护历史消息队列，退避期间的包由上层按有界
 队列策略丢弃。
+
+## 外部互操作工具
+
+`Dockerfile.test` 只用于验收；`network` 目标包含 FFmpeg 和 `tc netem`。`desktop`
+目标从固定 Ubuntu 基础镜像单独构建，包含 VLC、VLC SRT access plugin、OBS 和
+Xvfb，不继承 FFmpeg 工具镜像中的 `/usr/local` 媒体库。这些工具不会进入 aimedia
+运行镜像。PowerShell 脚本覆盖输入/输出的四种 SRT caller/listener 组合，并检查
+codec、首帧 IDR 和 PTS/DTS 单调性：
+
+```powershell
+docker build -f docker/Dockerfile.test --target network -t aimedia:test-tools .
+pwsh ./tools/interop.ps1 `
+  -EngineImage aimedia:gpu `
+  -PeerImage aimedia:test-tools `
+  -SkipToolBuild
+```
+
+OBS/VLC 互操作验收使用完整工具目标：
+
+```powershell
+docker build -f docker/Dockerfile.test --target desktop -t aimedia:desktop-tools .
+pwsh ./tools/interop.ps1 `
+  -EngineImage aimedia:gpu `
+  -PeerImage aimedia:test-tools `
+  -DesktopImage aimedia:desktop-tools `
+  -Suite desktop `
+  -SkipToolBuild
+```
+
+`obs.py` 通过容器内的 obs-websocket v5 动态创建 Media Source 和自定义推流服务，
+不依赖预制的用户场景文件。OBS 输出验收要求实际渲染 PNG，OBS 输入和 VLC
+输出验收都要再由 ffprobe 检查媒体包。SRT 的 OBS 配置方式遵循
+[OBS 官方 SRT 指南](https://obsproject.com/kb/srt-protocol-streaming-guide)。测试 OBS 的
+WebSocket 鉴权只在未暴露端口的临时容器内关闭，不是生产配置示例。
+
+VLC 的 SRT input module 位于 Ubuntu 的 `vlc-plugin-access-extra`，不能只根据
+`vlc --version` 判断 SRT 可用。脚本先检查插件文件，再通过 raw dump 保存 aimedia
+原始 TS；这样 ffprobe 检查的是引擎时间戳，而不是 VLC 重新 mux 后的时间戳。
+
+首个组合会在引擎、发送端和接收端的网络命名空间各注入 20ms 延迟、
+20ms 抖动和 1% 丢包，形成约 40ms RTT 的双向损伤链路；它需要测试容器的
+`NET_ADMIN` capability，不修改宿主机网络。国内构建机
+可以显式覆盖测试镜像的 APT 镜像源：
+
+```powershell
+pwsh ./tools/interop.ps1 `
+  -EngineImage aimedia:gpu `
+  -AptMirror http://mirrors.aliyun.com/ubuntu
+```
+
+极简 Ubuntu base 默认没有 CA bundle，因此自定义 `APT_MIRROR` 应使用可直接访问的
+HTTP Ubuntu 镜像；APT 仍会校验 Ubuntu 签名的 repository metadata 和 package hash。
+默认不传参数时使用 Ubuntu 官方源。
+
+脚本在系统临时目录中保留 `summary.json`、输出 TS、OBS 日志和渲染截图；容器和
+专用 Docker network 默认自动清理。
