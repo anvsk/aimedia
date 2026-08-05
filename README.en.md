@@ -24,8 +24,9 @@ runtime-loaded libsrt and libxaac adapters, a bounded single-input scheduler, pr
 NVIDIA capability boundaries, deterministic switching policy, audio DSP, replay, benchmarks, and
 fuzz targets.
 
-An RTSP/RTP session boundary now wraps `retina 0.4.19` behind aimedia-owned track, event, timestamp,
-and error types. It remains `foundation` until the native runtime graph and external-camera gates pass.
+An RTSP/RTP session boundary wraps `retina 0.4.19` behind aimedia-owned types. Interleaved TCP
+H.264/AAC/G.711 now enters the bounded native single-input runtime directly; it remains experimental
+until external-camera, GPU end-to-end, network impairment, and soak gates pass.
 
 Frame-level NVDEC/NVENC and the production single-SRT GPU loop now run end to end. Input gaps keep
 the last healthy frame with silent audio; SRT recovery resets the affected timeline, while output
