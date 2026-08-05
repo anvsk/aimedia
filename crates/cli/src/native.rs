@@ -1,6 +1,5 @@
 use aimedia_aac::Libxaac;
 use aimedia_core::PipelineConfig;
-use aimedia_graph::QueueCapacities;
 use aimedia_nvidia::{NvdecConfig, NvdecDecoder, NvencConfig, NvencEncoder};
 use aimedia_runtime::{
     ControlServer,
@@ -75,16 +74,14 @@ async fn build_backends(config: &PipelineConfig) -> Result<SinglePipelineBackend
         .audio_encoder()
         .context("could not create the native AAC encoder")?;
 
-    let queue_capacities = QueueCapacities::from_config(config);
-    let output_surfaces = u32::try_from(queue_capacities.video_frames.saturating_add(2))
-        .context("video queue capacity exceeds the NVDEC surface counter")?;
+    // The program timeline retains one latest frame, so the fixed NVDEC default provides
+    // bounded decoder headroom without scaling GPU surfaces with the network buffer duration.
     let video_decoder = NvdecDecoder::new(NvdecConfig {
         max_coded_width: align_up(video.width, 16),
         max_coded_height: align_up(video.height, 16),
         max_display_width: video.width,
         max_display_height: video.height,
         max_fps: video.fps,
-        output_surfaces,
         ..NvdecConfig::default()
     })
     .context("could not initialize the NVDEC H.264 decoder")?;

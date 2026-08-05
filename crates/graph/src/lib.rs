@@ -360,8 +360,8 @@ pub fn compile(config: &PipelineConfig) -> Result<ExecutionPlan, CompileError> {
             MediaType::Nv12Video,
             MemoryDomain::NvidiaDevice,
             ClockDomain::Source,
-            capacities.video_frames,
-            FullPolicy::Backpressure,
+            1,
+            FullPolicy::KeepLatest,
         ));
         edges.push(edge(
             &format!("audio.decode.{index}"),
@@ -456,8 +456,8 @@ pub fn compile(config: &PipelineConfig) -> Result<ExecutionPlan, CompileError> {
             MediaType::Nv12Video,
             MemoryDomain::NvidiaDevice,
             ClockDomain::Program,
-            capacities.video_frames,
-            FullPolicy::Backpressure,
+            1,
+            FullPolicy::KeepLatest,
         ),
         edge(
             "audio.timeline",
@@ -591,6 +591,20 @@ mod tests {
             Some(QueueContract {
                 capacity: 256,
                 full_policy: FullPolicy::Backpressure,
+            })
+        );
+        assert_eq!(
+            plan.queue("video.decode.0", "video.timeline"),
+            Some(QueueContract {
+                capacity: 1,
+                full_policy: FullPolicy::KeepLatest,
+            })
+        );
+        assert_eq!(
+            plan.queue("video.timeline", "video.encode"),
+            Some(QueueContract {
+                capacity: 1,
+                full_policy: FullPolicy::KeepLatest,
             })
         );
     }

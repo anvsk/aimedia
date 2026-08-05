@@ -86,12 +86,32 @@ VLC 3.0.20 的 SRT 输入不在 Ubuntu `vlc` 主包中，必须安装
 - 收到 211 个视频包和 332 个音频包；
 - 首视频包为 keyframe，PTS/DTS 单调。
 
+## 延迟输出端与输入积压回归
+
+`backlog` 场景先让 input caller 连接正在发送的 FFmpeg listener，再延迟 4 秒启动
+output listener 的接收端。合并 PR #17 时的 `main` 镜像稳定失败：
+
+```text
+NVIDIA operation cuvidMapVideoFrame64 failed with code 205
+```
+
+PR [#18](https://github.com/anvsk/aimedia/pull/18) 将解码视频到节目时间线改为容量 1
+的 `keepLatest` slot。过期视频 surface 在
+下一次突发解码前释放，压缩包和音频队列仍保持有界 backpressure。相同脚本结果：
+
+- 旧镜像退出码 1，修复镜像的发送端、接收端和 aimedia 退出码均为 0；
+- 明确替换 143 个过期视频帧；
+- NVDEC surface 容量由随 `bufferMs` 扩张的 34 降为固定 4，高水位 4；
+- 输出 300 个视频包和 469 个音频包；
+- 首视频包为 keyframe，PTS/DTS 单调。
+
+正常、不延迟的 caller input 到 listener output 也完成回归：261 个视频包、410 个
+音频包，双方 SRT connected，首视频包为 keyframe，PTS/DTS 单调。
+
 ## 已知限制与下一门槛
 
-- 如果输入 caller 已开始积压，而 output listener 超过约 3 秒才连接，曾稳定复现
-  `cuvidMapVideoFrame64` 返回 205。输出端在引擎前就绪、或引擎使用 output caller
-  主动连接已就绪 listener 时未复现。该问题归入 V2-09 的延迟接收端与 surface
-  生命周期恢复门槛，在修复和两小时 soak 前不宣称生产稳定。
+- 延迟 output listener 的 NVDEC 205 已有失败对照与修复回归；V2-09 仍需两小时
+  1080p30 soak、延迟 p95 和 RSS/GPU 内存趋势证据，当前不宣称生产稳定。
 - OBS 的 `cleanShutdown=false` 是当前本机测试工具镜像的独立已知问题；它不会改写
   aimedia 的退出码或媒体结果。
 - 本报告证明 v0.2 支持范围内的外部互操作，不证明 RTMP、RTSP、H.265、缩放、变帧率
