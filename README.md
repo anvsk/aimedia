@@ -103,6 +103,7 @@ crates/
 进一步阅读：
 
 - [RFC 0001：意图驱动的实时媒体运行时](docs/rfcs/0001-intent-media-runtime.md)
+- [RFC 0002：主流摄像机 RTSP/RTP 输入](docs/rfcs/0002-rtsp-input.md)
 - [架构说明](docs/architecture.md)
 - [执行路线图与完成状态](docs/roadmap.md)
 - [用户故事](docs/user-stories.md)

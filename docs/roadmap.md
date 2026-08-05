@@ -133,7 +133,14 @@ v0.3 工程。只有 V2-11 也完成后，总览才把 v0.2 标记为完全完�
   命令；单输出和 director tap 先使用未来列表结构，但未实现的数据面能力会明确拒绝。
   证据：PR [#23](https://github.com/anvsk/aimedia/pull/23)，workspace tests、严格 Clippy、
   Docker explain/conversion smoke、NVIDIA SDK ABI build/test 和更新后验收脚本语法检查。
-- [ ] **V3-02 RTSP/RTP 输入**：H.264/H.265 视频及 AAC/G.711 音频。
+- [ ] **V3-02 RTSP/RTP 输入**：按 [RFC 0002](rfcs/0002-rtsp-input.md) 完成主流摄像机
+  拉流；H.264 + AAC/G.711 形成完整输出闭环，H.265 完成 depacketize 后交给 V3-04。
+  - [ ] V3-02A：契约、依赖审查、MediaJob RTSP schema 与 fixture 语料。
+  - [ ] V3-02B：短目录 `crates/rtsp` 的会话、鉴权、SDP 和类型化媒体事件。
+  - [ ] V3-02C：TCP interleaved H.264/AAC/G.711 单路运行时闭环。
+  - [ ] V3-02D：UDP RTP/RTCP、固定重排窗口、超时和重连。
+  - [ ] V3-02E：H.265 RTP 重组、明确 bridge pending 与 V3-04 handoff。
+  - [ ] V3-02F：外部设备、网络损伤、两小时 soak 和支持矩阵升级。
 - [ ] **V3-03 RTMP/RTMPS 与 FLV**：输入、输出、FLV demux/mux。
 - [ ] **V3-04 HEVC Bridge**：H.265 输入转 H.264 输出。
 - [ ] **V3-05 格式归一化**：720p/1080p、25/30/50/60fps、横竖屏、44.1/48kHz
