@@ -103,7 +103,8 @@
   单调，RSS/GPU 内存不持续增长，运行镜像无 FFmpeg/libav；修复输入 caller 已积压时
   延迟 output listener 连接导致的 `cuvidMapVideoFrame64` 205，并加入 surface 生命周期
   与延迟接收端回归。
-  证据：[性能与稳定性报告](reports/v0.2-native-live-pipe.md)。RTX 5060 Laptop +
+  证据：PR [#19](https://github.com/anvsk/aimedia/pull/19) 与
+  [性能和稳定性报告](reports/v0.2-native-live-pipe.md)。RTX 5060 Laptop +
   577.12 驱动连续运行 7,215 秒，216,017 个运行时视频样本的 p50/p95 为
   134/173ms；视频/音频零丢帧，PTS/DTS/PCR 零倒退，surface 高水位 3/4，RSS
   首尾窗口 +2.5MiB，设备显存 178→178MiB，运行镜像无 FFmpeg/libav。延迟 4 秒连接
