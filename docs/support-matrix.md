@@ -13,7 +13,7 @@
 | `aimedia/v1alpha1` 配置 | supported | 严格字段、范围和密钥引用校验；`DirectorPipeline` 是待迁移的 v0.1 适配层 |
 | 类型化执行图 | supported | `aimedia-graph` 输出媒体、内存、时钟、队列、资源和节点实现状态；单路执行器从计划读取队列契约 |
 | 单路/双路配置契约 | foundation | `inputs` 接受 1–2 路；单路 state、`notApplicable` 和队列/codec/GPU/SRT 指标结构已测 |
-| 单路有界媒体调度器 | experimental | libsrt、MPEG-TS、NVDEC/NVENC 和 libxaac 已接入 `aimedia run`；RTX 5060 Laptop 上完成 15 秒 FFmpeg→aimedia→ffprobe 数据面，待恢复、互操作和长稳门槛 |
+| 单路有界媒体调度器 | experimental | libsrt、MPEG-TS、NVDEC/NVENC 和 libxaac 已接入 `aimedia run`；RTX 5060 Laptop 上完成输入断流保帧/静音、输入恢复和输出重连，恢复流首视频包为 IDR 且 continuity error 为 0；待更广互操作和长稳门槛 |
 | 双机位导播策略 | supported | replay/bench 可运行；属于可选策略示例，不再是核心发布前提 |
 | 人工 take/hold | foundation | 状态机、版本化 Unix Socket、CLI 和 mock runtime 已测；待接视频 tick |
 | VLM 建议约束 | supported | OpenAI 兼容 client、deadline、expiry、25% 权重 |
@@ -21,7 +21,7 @@
 | 流式 MPEG-TS demux/mux | experimental | 任意字节分块、PSI/PES、CRC、PTS 回绕和 mux 往返已测；FFmpeg 输入和 ffprobe 输出完成 15 秒真实流互操作，待更多接收端和损坏流验证 |
 | H.264 Annex-B / AAC ADTS parser | supported | NAL/frame、关键帧和 Alpha profile header |
 | BS.1770/4x true-peak DSP | foundation | 响度、增益、淡化和 limiter 已实现；AAC 帧级 codec 已就绪，待接运行时音频链 |
-| SRT caller/listener | experimental | libsrt 1.5.5 adapter、epoll、指数退避和断开后 native 重连已测；输入 listener、输出 caller 完成真实闭环，待四种组合、网络损伤与长稳测试 |
+| SRT caller/listener | experimental | libsrt 1.5.5 adapter、epoll、指数退避和断开后 native 重连已测；输入 listener/输出 caller 完成真实断流与两端恢复，断线期显式丢弃实时输出；待四种组合、网络损伤与长稳测试 |
 | RTMP/RTMPS + FLV | planned | v0.3 跨区域平台发布基线 |
 | RTSP/RTP input | planned | v0.3 摄像机接入；不代表 GB28181 |
 | 多输出与 Analyzer Tap | planned | v0.4；每个支路独立有界并与媒体主链隔离 |

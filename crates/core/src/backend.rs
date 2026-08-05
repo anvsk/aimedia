@@ -114,9 +114,15 @@ pub enum BackendError {
     Processing(String),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TransportChunk {
+    pub data: Vec<u8>,
+    pub discontinuity: bool,
+}
+
 #[async_trait]
 pub trait Transport: Send {
-    async fn receive(&mut self) -> Result<Vec<u8>, BackendError>;
+    async fn receive(&mut self) -> Result<TransportChunk, BackendError>;
     async fn send(&mut self, payload: &[u8]) -> Result<(), BackendError>;
     async fn close(&mut self) -> Result<(), BackendError>;
 }
