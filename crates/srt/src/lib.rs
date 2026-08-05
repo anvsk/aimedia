@@ -14,7 +14,7 @@ use std::{
 
 use aimedia_core::{
     SrtRuntimeStats,
-    backend::{BackendError, Transport, TransportChunk},
+    backend::{BackendError, Transport, TransportChunk, TransportObserver},
     config::{ReconnectConfig, SecretError, SrtConfig, SrtMode},
 };
 use async_trait::async_trait;
@@ -1115,6 +1115,17 @@ impl Transport for SrtTransport {
         .await
         .map_err(|error| BackendError::Io(error.to_string()))?
         .map_err(BackendError::from)
+    }
+
+    fn observer(&self) -> Option<Arc<dyn TransportObserver>> {
+        Some(Arc::new(self.clone()))
+    }
+}
+
+#[async_trait]
+impl TransportObserver for SrtTransport {
+    async fn stats(&self) -> Result<SrtRuntimeStats, BackendError> {
+        SrtTransport::stats(self).await.map_err(BackendError::from)
     }
 }
 

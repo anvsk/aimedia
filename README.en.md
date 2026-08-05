@@ -26,8 +26,10 @@ fuzz targets.
 
 Frame-level NVDEC/NVENC and the production single-SRT GPU loop now run end to end. Input gaps keep
 the last healthy frame with silent audio; SRT recovery resets the affected timeline, while output
-recovery drops stale packets, emits fresh PAT/PMT, and requests an IDR. Broader interoperability,
-network impairment, and soak gates are still pending, so the data plane remains experimental.
+recovery drops stale packets, emits fresh PAT/PMT, and requests an IDR. Runtime state now reports
+every execution-plan edge, codec counters, NVDEC surface leases, and live input/output SRT stats.
+Broader interoperability, network impairment, and soak gates are still pending, so the data plane
+remains experimental.
 
 ```bash
 cargo run -p aimedia -- explain -f examples/single-srt.yaml

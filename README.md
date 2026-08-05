@@ -36,6 +36,8 @@
   单路生产后端装配和本机控制协议；
 - 输入断流期间按节目时钟重复最后健康画面并输出静音，SRT 恢复后重置 TS/decoder
   时间线；输出重连丢弃过期包、重发 PAT/PMT 并请求 IDR；
+- `state --json` 直接报告每条执行计划边的容量/水位、codec 帧数、GPU surface
+  租约和输入/输出 SRT 重连，用于检查 `explain` 与真实执行器是否一致；
 - 双输入确定性导播、音频 DSP、VLM contract、replay、bench 和 fuzz。
 
 尚未完成，也不会伪装为已经完成：

@@ -12,15 +12,16 @@ use std::time::{Duration, Instant};
 use aimedia_core::{
     PipelineConfig, PipelineRuntimeState, Timestamp,
     backend::{
-        AudioDecoder, AudioEncoder, AudioFrame, BackendError, CodecId, MediaPacket, Transport,
-        TransportChunk, VideoDecoder, VideoEncoder, VideoFrame,
+        AudioDecoder, AudioEncoder, AudioFrame, BackendError, CodecId, GpuSurfaceObserver,
+        MediaPacket, Transport, TransportChunk, TransportObserver, VideoDecoder, VideoEncoder,
+        VideoFrame,
     },
 };
 use aimedia_graph::{ExecutionPlan, FullPolicy, JobMode, compile as compile_plan};
 use aimedia_mpegts::{DemuxEvent, MuxPacket, MuxStream, StreamDemuxer, StreamMuxer, TsError};
 use thiserror::Error;
 use tokio::{
-    sync::{Mutex, mpsc},
+    sync::{Mutex, mpsc, watch},
     task::JoinSet,
 };
 
@@ -188,6 +189,9 @@ impl SinglePipeline {
             audio_decoder,
             audio_encoder,
         } = backends;
+        let input_observer = input.observer();
+        let output_observer = output.observer();
+        let surface_observer = video_decoder.surface_observer();
         let queues = SingleQueuePlan::from_plan(&plan)?;
         let input_name = config.inputs[0].name.clone();
         let video_period = Duration::from_secs_f64(1.0 / f64::from(config.media.video.fps));
@@ -206,6 +210,33 @@ impl SinglePipeline {
         let (encoded_tx, encoded_rx) = mpsc::channel(queues.encoded_messages);
         let request_idr = Arc::new(AtomicBool::new(true));
         let mut tasks = JoinSet::new();
+        let mut monitors = JoinSet::new();
+        let (monitor_stop, monitor_stop_rx) = watch::channel(false);
+
+        if let Some(observer) = input_observer {
+            monitors.spawn(monitor_transport(
+                observer,
+                TransportStateTarget::Input(0),
+                controller.clone(),
+                monitor_stop_rx.clone(),
+            ));
+        }
+        if let Some(observer) = output_observer {
+            monitors.spawn(monitor_transport(
+                observer,
+                TransportStateTarget::Output,
+                controller.clone(),
+                monitor_stop_rx.clone(),
+            ));
+        }
+        if let Some(observer) = surface_observer {
+            monitors.spawn(monitor_gpu_surfaces(
+                observer,
+                0,
+                controller.clone(),
+                monitor_stop_rx,
+            ));
+        }
 
         let receive_controller = controller.clone();
         let receive_queue = format!("{input_name}.transport");
@@ -340,10 +371,14 @@ impl SinglePipeline {
         if let Some(error) = failure {
             tasks.abort_all();
             while tasks.join_next().await.is_some() {}
+            let _ = monitor_stop.send(true);
+            while monitors.join_next().await.is_some() {}
             controller.finish().await;
             return Err(error);
         }
 
+        let _ = monitor_stop.send(true);
+        while monitors.join_next().await.is_some() {}
         controller.finish().await;
         Ok(controller.state().await)
     }
@@ -399,6 +434,7 @@ async fn demux_transport(
         if chunk.discontinuity {
             demuxer = StreamDemuxer::new();
             pending_discontinuity = [true; 2];
+            controller.mark_input_discontinuity(0).await;
             tracing::warn!("input transport reconnected; reset MPEG-TS state");
         }
         route_demux_events(
@@ -422,6 +458,64 @@ async fn demux_transport(
         &mut pending_discontinuity,
     )
     .await
+}
+
+#[derive(Debug, Clone, Copy)]
+enum TransportStateTarget {
+    Input(usize),
+    Output,
+}
+
+async fn monitor_transport(
+    observer: Arc<dyn TransportObserver>,
+    target: TransportStateTarget,
+    controller: ControllerHandle,
+    mut stop: watch::Receiver<bool>,
+) {
+    let mut interval = tokio::time::interval(Duration::from_millis(250));
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    loop {
+        tokio::select! {
+            changed = stop.changed() => {
+                if changed.is_err() || *stop.borrow() {
+                    break;
+                }
+            }
+            _ = interval.tick() => match observer.stats().await {
+                Ok(stats) => match target {
+                    TransportStateTarget::Input(index) => {
+                        controller.set_input_srt(index, stats).await;
+                    }
+                    TransportStateTarget::Output => controller.set_output_srt(stats).await,
+                },
+                Err(error) => {
+                    tracing::warn!(?target, %error, "could not sample transport state");
+                }
+            }
+        }
+    }
+}
+
+async fn monitor_gpu_surfaces(
+    observer: Arc<dyn GpuSurfaceObserver>,
+    input: usize,
+    controller: ControllerHandle,
+    mut stop: watch::Receiver<bool>,
+) {
+    let mut interval = tokio::time::interval(Duration::from_millis(100));
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    loop {
+        tokio::select! {
+            changed = stop.changed() => {
+                if changed.is_err() || *stop.borrow() {
+                    break;
+                }
+            }
+            _ = interval.tick() => {
+                controller.set_gpu_surfaces(input, observer.stats()).await;
+            }
+        }
+    }
 }
 
 async fn route_demux_events(
