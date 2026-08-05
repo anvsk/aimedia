@@ -129,14 +129,19 @@ v0.3 工程。只有 V2-11 也完成后，总览才把 v0.2 标记为完全完�
 
 用户故事：直播后端开发者把现场 RTSP/SRT/RTMP 输入归一化后发布到国内外平台。
 
-- [ ] `MediaJob` v2 配置取代 `DirectorPipeline` 适配层，提供显式转换命令。
-- [ ] RTSP/RTP 输入：H.264/H.265 视频及 AAC/G.711 音频。
-- [ ] RTMP/RTMPS 输入输出与 FLV demux/mux。
-- [ ] H.265 输入转 H.264 输出。
-- [ ] 720p/1080p、25/30/50/60fps、横竖屏、44.1/48kHz 和单/双声道归一化。
-- [ ] 腾讯云、阿里云、YouTube 非公开直播和 Twitch bandwidth test 真实验证。
-- [ ] 分阶段 DNS/TLS/鉴权/格式错误，敏感信息不进入日志。
-- [ ] 两小时跨协议 soak、支持矩阵、版本 Release 和社区兼容报告。
+- [x] **V3-01 MediaJob v2 配置**：取代 `DirectorPipeline` 运行时适配层，提供显式转换
+  命令；单输出和 director tap 先使用未来列表结构，但未实现的数据面能力会明确拒绝。
+  证据：PR [#23](https://github.com/anvsk/aimedia/pull/23)，workspace tests、严格 Clippy、
+  Docker explain/conversion smoke、NVIDIA SDK ABI build/test 和更新后验收脚本语法检查。
+- [ ] **V3-02 RTSP/RTP 输入**：H.264/H.265 视频及 AAC/G.711 音频。
+- [ ] **V3-03 RTMP/RTMPS 与 FLV**：输入、输出、FLV demux/mux。
+- [ ] **V3-04 HEVC Bridge**：H.265 输入转 H.264 输出。
+- [ ] **V3-05 格式归一化**：720p/1080p、25/30/50/60fps、横竖屏、44.1/48kHz
+  和单/双声道。
+- [ ] **V3-06 平台互操作**：腾讯云、阿里云、YouTube 非公开直播和 Twitch bandwidth
+  test 真实验证。
+- [ ] **V3-07 可诊断连接**：分阶段 DNS/TLS/鉴权/格式错误，敏感信息不进入日志。
+- [ ] **V3-08 发布**：两小时跨协议 soak、支持矩阵、版本 Release 和社区兼容报告。
 
 ## v0.4 Fan-out & AI Tap
 
