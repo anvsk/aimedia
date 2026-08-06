@@ -28,6 +28,11 @@ An RTSP/RTP session boundary wraps `retina 0.4.19` behind aimedia-owned types. I
 H.264/AAC/G.711 now enters the bounded native single-input runtime directly; it remains experimental
 until external-camera, GPU end-to-end, network impairment, and soak gates pass.
 
+The concise `crates/rtmp` boundary now provides a cleartext listener and RTMP/RTMPS publisher.
+Reconnects never retain historical live packets and publishing resumes only from a fresh IDR with
+codec configuration. External OBS/FFmpeg/MediaMTX and platform soak gates remain, so RTMP is still
+experimental rather than supported.
+
 Frame-level NVDEC/NVENC and the production single-SRT GPU loop now run end to end. Input gaps keep
 the last healthy frame with silent audio; SRT recovery resets the affected timeline, while output
 recovery drops stale packets, emits fresh PAT/PMT, and requests an IDR. Runtime state now reports

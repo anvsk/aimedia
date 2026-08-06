@@ -7,11 +7,11 @@
 ## 1. 先理解当前作业
 
 ```text
-SRT/MPEG-TS -> TS 拆包 ------\
-                              -> 压缩音视频包 -> 解码 -> 独立节目时间线
-RTSP/RTP ----> RTP 拆包 ------/                         |
-                                                        v
-                                       编码 -> MPEG-TS -> SRT 输出
+SRT/MPEG-TS -> TS 拆包 -------\
+RTSP/RTP ----> RTP 拆包 -------+-> 压缩音视频包 -> 解码 -> 独立节目时间线
+RTMP/FLV ----> FLV tag 转换 ---/                         |
+                                                         v
+                         编码 -> MPEG-TS/SRT 或 FLV/RTMP(S) 输出
 ```
 
 v0.2 固定 H.264 8-bit 4:2:0、最高 1080p30、AAC-LC 48kHz 双声道。固定支持范围不是
@@ -38,6 +38,11 @@ RTP 拆包，产出的 H.264/AAC-LC/G.711 压缩帧直接进入统一 codec 队�
 MPEG-TS 再拆一次。G.711 摄像机音频会从 8kHz 单声道桥接为输出需要的 48kHz 双声道。
 当前状态仍是 `experimental`：UDP、H.265 bridge、非 48kHz 双声道 AAC、外部摄像机
 兼容和长稳分别由后续 V3-02D 至 V3-02F 完成。
+
+RTMP 输入/输出同样直接接公共压缩包边界：listener 把 FLV tag 转为 H.264 Annex-B 和
+AAC ADTS，publisher 做反向转换，因此不会为了跨协议发布多做一次 TS 封装/拆包。
+RTMPS 校验公开 WebPKI 信任链和主机名；输出断开时不保存历史直播包，重连后等新的
+SPS/PPS + IDR 再恢复。外部软件、真实平台和两小时门禁完成前保持 `experimental`。
 
 ## 2. 在 CPU 环境查看执行计划
 
@@ -126,6 +131,21 @@ docker run --rm --gpus all \
 
 这是已接通的数据面，不等于已完成市面摄像机兼容认证；正式使用前先以自己的设备做
 短时验证，并查看 `control state --json` 中的 `rtsp`、codec 和队列字段。
+
+向支持 RTMPS 的平台发布时，以 `examples/rtmp-output.yaml` 为起点。URI 只写主机和
+application 路径，stream key 放在环境变量或挂载文件：
+
+```bash
+docker run --rm --gpus all \
+  -e NVIDIA_DRIVER_CAPABILITIES=compute,utility,video \
+  -e AIMEDIA_RTMP_STREAM_NAME='<stream-key>' \
+  -v "$PWD/examples:/work:ro" \
+  aimedia:gpu run -f /work/rtmp-output.yaml
+```
+
+`control state --json` 的 `output.rtmp` 会报告 `transport`（`tcp` 或 `tls`）、连接状态、
+已发送 packet、重连次数和最近发送时间。平台互操作门禁未完成前，先用测试频道或平台
+提供的带宽测试入口验证，不能直接把 `experimental` 当成生产兼容承诺。
 
 ## 5. 可选导播示例
 

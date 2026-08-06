@@ -24,7 +24,7 @@
 | BS.1770/4x true-peak DSP | foundation | 响度、增益、淡化和 limiter 已实现；AAC 帧级 codec 已就绪，待接运行时音频链 |
 | SRT caller/listener | supported | libsrt 1.5.5 adapter、epoll、指数退避和断开后 native 重连已测；caller/listener 四种组合、断流恢复、1% 丢包/20ms 抖动/40ms RTT 及两小时长稳已验证 |
 | RTMP listener input + FLV | experimental | V3-03D 已把明文 `rtmp://` listener、H.264 Annex-B/AVCC 与 AAC ADTS/raw 转换接入单路 `aimedia run`，可使用 `examples/rtmp-input.yaml` 把一个 publisher 转到 SRT 输出；新 publisher 接替旧连接时重新等待 sequence header/IDR 并标记 discontinuity。真实 TCP 回环和有界运行时已测，但 OBS/FFmpeg/MediaMTX 外部互操作、网络故障和两小时 soak 尚未完成 |
-| RTMP/RTMPS publisher output | foundation | 有界 Sans-I/O publisher 和媒体格式转换已实现；socket、rustls、重连、配置重发和 IDR 闸门留在 V3-03E。真实 `run` 对 RTMP/RTMPS 输出返回 `rtmpOutputPendingV3_03E`，不可用于平台发布 |
+| RTMP/RTMPS publisher output | experimental | V3-03E 已将编码后的 H.264 Annex-B/AAC ADTS 直接接入有界 publisher；RTMPS 使用 rustls 与公开 WebPKI 信任根校验证书和主机名，流密钥与 URI 分离。输出断开时不积压历史包，后台指数退避重连后重发 AVC/AAC 配置并等待新 IDR；`state` 报告 TCP/TLS、连接、发包和重连指标。真实 TCP loopback、断线和门禁已测；OBS/FFmpeg/MediaMTX、真实平台、网络故障和两小时 soak 尚未完成，不能标记为 supported |
 | RTSP/RTP input | experimental | `aimedia run` 已接 TCP interleaved 单路数据面：H.264/AAC-LC/G.711 直接进入有界 codec 队列，G.711 8kHz 单声道归一到 48kHz 双声道；MediaMTX 1.20.0 + FFmpeg 发布端已通过 180 秒 GPU 闭环、发布源 404 重连和 40ms RTT/20ms 抖动/1% 丢包短门禁，p95 90ms 且输出时间戳零回退。H.265 可重组为 Annex-B access unit，但 HEVC bridge 仍返回 `videoBridgePending`；UDP、非 48kHz 双声道 AAC、物理摄像机认证和两小时长稳未完成，不代表 GB28181 支持 |
 | 多输出与 Analyzer Tap | planned | v0.4；每个支路独立有界并与媒体主链隔离 |
 | WHIP output | planned | v0.6 以后按真实服务采用证据评估；H.264/Opus |

@@ -17,8 +17,8 @@ pub use config::{ConfigError, MediaJob, PipelineConfig, convert_legacy_yaml};
 pub use control::{
     ControlCommand, ControlErrorCode, ControlRequest, ControlResponse, GpuSurfaceRuntimeStats,
     InputCodecRuntimeStats, InputRuntimeState, LatencyRuntimeStats, OutputRuntimeState,
-    PipelineMode, PipelineRuntimeState, QueueRuntimeState, RtmpRuntimeStats, RtspRuntimeStats,
-    SrtRuntimeStats,
+    PipelineMode, PipelineRuntimeState, QueueRuntimeState, RtmpOutputRuntimeStats,
+    RtmpRuntimeStats, RtspRuntimeStats, SrtRuntimeStats,
 };
 pub use director::{
     CameraSnapshot, Director, DirectorDecision, DirectorEvent, FastSignals, SwitchReason,

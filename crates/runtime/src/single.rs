@@ -10,11 +10,13 @@ use std::sync::{
 use std::time::{Duration, Instant};
 
 use aimedia_core::{
-    PipelineConfig, PipelineRuntimeState, RtmpRuntimeStats, RtspRuntimeStats, Timestamp,
+    PipelineConfig, PipelineRuntimeState, RtmpOutputRuntimeStats, RtmpRuntimeStats,
+    RtspRuntimeStats, Timestamp,
     backend::{
         AudioDecoder, AudioEncoder, AudioFrame, BackendError, CodecId, GpuSurfaceObserver,
-        MediaPacket, PacketSource, PacketSourceObserver, PacketSourceRuntimeStats, Transport,
-        TransportChunk, TransportObserver, VideoDecoder, VideoEncoder, VideoFrame,
+        MediaPacket, PacketSink, PacketSinkObserver, PacketSinkOutcome, PacketSinkRuntimeStats,
+        PacketSource, PacketSourceObserver, PacketSourceRuntimeStats, Transport, TransportChunk,
+        TransportObserver, VideoDecoder, VideoEncoder, VideoFrame,
     },
 };
 use aimedia_graph::{ExecutionPlan, FullPolicy, JobMode, compile as compile_plan};
@@ -183,9 +185,23 @@ impl std::fmt::Debug for SingleInput {
     }
 }
 
+pub enum SingleOutput {
+    Transport(Box<dyn Transport>),
+    Packets(Box<dyn PacketSink>),
+}
+
+impl std::fmt::Debug for SingleOutput {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Transport(_) => formatter.write_str("SingleOutput::Transport(..)"),
+            Self::Packets(_) => formatter.write_str("SingleOutput::Packets(..)"),
+        }
+    }
+}
+
 pub struct SinglePipelineBackends {
     pub input: SingleInput,
-    pub output: Box<dyn Transport>,
+    pub output: SingleOutput,
     pub video_decoder: Box<dyn VideoDecoder>,
     pub video_encoder: Box<dyn VideoEncoder>,
     pub audio_decoder: Box<dyn AudioDecoder>,
@@ -266,7 +282,10 @@ impl SinglePipeline {
             SingleInput::Packets(input) => input.observer(),
             SingleInput::Transport(_) => None,
         };
-        let output_observer = output.observer();
+        let (output_observer, output_packet_observer) = match &output {
+            SingleOutput::Transport(output) => (output.observer(), None),
+            SingleOutput::Packets(output) => (None, output.observer()),
+        };
         let surface_observer = video_decoder.surface_observer();
         let queues = SingleQueuePlan::from_plan(&plan)?;
         let input_name = config.inputs[0].name.clone();
@@ -312,6 +331,13 @@ impl SinglePipeline {
             monitors.spawn(monitor_transport(
                 observer,
                 TransportStateTarget::Output,
+                controller.clone(),
+                monitor_stop_rx.clone(),
+            ));
+        }
+        if let Some(observer) = output_packet_observer {
+            monitors.spawn(monitor_packet_sink(
+                observer,
                 controller.clone(),
                 monitor_stop_rx.clone(),
             ));
@@ -470,10 +496,15 @@ impl SinglePipeline {
         });
         let output_controller = controller.clone();
         tasks.spawn(async move {
-            (
-                "output",
-                mux_and_send(output, encoded_rx, request_idr, output_controller).await,
-            )
+            let result = match output {
+                SingleOutput::Transport(output) => {
+                    mux_and_send(output, encoded_rx, request_idr, output_controller).await
+                }
+                SingleOutput::Packets(output) => {
+                    send_packets(output, encoded_rx, request_idr, output_controller).await
+                }
+            };
+            ("output", result)
         });
 
         let mut completed = 0_usize;
@@ -717,6 +748,28 @@ async fn monitor_packet_source(
     }
 }
 
+async fn monitor_packet_sink(
+    observer: Arc<dyn PacketSinkObserver>,
+    controller: ControllerHandle,
+    mut stop: watch::Receiver<bool>,
+) {
+    let mut interval = tokio::time::interval(Duration::from_millis(250));
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    loop {
+        tokio::select! {
+            changed = stop.changed() => {
+                if changed.is_err() || *stop.borrow() {
+                    break;
+                }
+            }
+            _ = interval.tick() => match observer.stats().await {
+                Ok(stats) => set_packet_sink_stats(&controller, stats).await,
+                Err(error) => tracing::warn!(%error, "could not sample packet-sink state"),
+            }
+        }
+    }
+}
+
 fn rtsp_stats(stats: PacketSourceRuntimeStats) -> RtspRuntimeStats {
     RtspRuntimeStats {
         connected: stats.connected,
@@ -747,6 +800,23 @@ async fn set_packet_source_stats(
         "rtsp" => controller.set_input_rtsp(input, rtsp_stats(stats)).await,
         "rtmp" => controller.set_input_rtmp(input, rtmp_stats(stats)).await,
         protocol => tracing::warn!(input, protocol, "unknown packet-source protocol"),
+    }
+}
+
+async fn set_packet_sink_stats(controller: &ControllerHandle, stats: PacketSinkRuntimeStats) {
+    match stats.protocol.as_str() {
+        "rtmp" => {
+            controller
+                .set_output_rtmp(RtmpOutputRuntimeStats {
+                    connected: stats.connected,
+                    transport: stats.transport,
+                    packets_sent: stats.packets_sent,
+                    reconnects: stats.reconnects,
+                    last_send_age_ms: stats.last_send_age_ms,
+                })
+                .await;
+        }
+        protocol => tracing::warn!(protocol, "unknown packet-sink protocol"),
     }
 }
 
@@ -1143,6 +1213,56 @@ async fn encode_audio(
     Ok(())
 }
 
+async fn send_packets(
+    mut output: Box<dyn PacketSink>,
+    mut receiver: mpsc::Receiver<Timed<MediaPacket>>,
+    request_idr: Arc<AtomicBool>,
+    controller: ControllerHandle,
+) -> Result<(), SinglePipelineError> {
+    let queue = "program.output";
+    let mut output_failed = false;
+    let mut last_warning = None;
+    while let Some(packet) = receiver.recv().await {
+        controller.observe_queue(queue, receiver.len()).await;
+        let codec = packet.value.codec;
+        match output.send_packet(packet.value).await {
+            Ok(PacketSinkOutcome::Sent) => {
+                if codec == CodecId::H264 {
+                    controller
+                        .record_engine_latency(packet.entered_at.elapsed())
+                        .await;
+                }
+                if output_failed {
+                    tracing::info!(
+                        "packet output reconnected and resumed from a fresh video keyframe"
+                    );
+                    output_failed = false;
+                    last_warning = None;
+                }
+            }
+            Ok(PacketSinkOutcome::DroppedAwaitingKeyframe) => {
+                controller.record_output_drop(codec).await;
+                request_idr.store(true, Ordering::Release);
+            }
+            Err(error @ BackendError::Io(_)) => {
+                controller.record_output_drop(codec).await;
+                request_idr.store(true, Ordering::Release);
+                output_failed = true;
+                let now = Instant::now();
+                let should_warn = last_warning
+                    .is_none_or(|last| now.duration_since(last) >= Duration::from_secs(1));
+                if should_warn {
+                    tracing::warn!(%error, "dropping live packet while output reconnects");
+                    last_warning = Some(now);
+                }
+            }
+            Err(error) => return Err(error.into()),
+        }
+    }
+    output.close().await?;
+    Ok(())
+}
+
 async fn mux_and_send(
     mut output: Box<dyn Transport>,
     mut receiver: mpsc::Receiver<Timed<MediaPacket>>,
@@ -1233,15 +1353,15 @@ mod tests {
         PipelineConfig, Timestamp,
         backend::{
             AudioDecoder, AudioEncoder, AudioFrame, BackendError, CodecId, MediaPacket,
-            MemoryDomain, PacketSource, PixelFormat, SurfaceLease, Transport, TransportChunk,
-            VideoDecoder, VideoEncoder, VideoFrame, VideoSurface,
+            MemoryDomain, PacketSink, PacketSinkOutcome, PacketSource, PixelFormat, SurfaceLease,
+            Transport, TransportChunk, VideoDecoder, VideoEncoder, VideoFrame, VideoSurface,
         },
     };
     use aimedia_mpegts::{DemuxEvent, MuxPacket, MuxStream, StreamDemuxer, StreamMuxer};
     use async_trait::async_trait;
     use bytes::Bytes;
 
-    use super::{SingleInput, SinglePipeline, SinglePipelineBackends};
+    use super::{SingleInput, SingleOutput, SinglePipeline, SinglePipelineBackends};
 
     #[derive(Debug)]
     struct FakeTransport {
@@ -1264,6 +1384,26 @@ mod tests {
         async fn send(&mut self, payload: &[u8]) -> Result<(), BackendError> {
             self.sent.lock().expect("sent lock").push(payload.to_vec());
             Ok(())
+        }
+
+        async fn close(&mut self) -> Result<(), BackendError> {
+            Ok(())
+        }
+    }
+
+    #[derive(Debug)]
+    struct FakePacketSink {
+        sent: Arc<StdMutex<Vec<MediaPacket>>>,
+    }
+
+    #[async_trait]
+    impl PacketSink for FakePacketSink {
+        async fn send_packet(
+            &mut self,
+            packet: MediaPacket,
+        ) -> Result<PacketSinkOutcome, BackendError> {
+            self.sent.lock().expect("sent lock").push(packet);
+            Ok(PacketSinkOutcome::Sent)
         }
 
         async fn close(&mut self) -> Result<(), BackendError> {
@@ -1428,10 +1568,10 @@ mod tests {
                     receive: input_transport().into(),
                     sent: Arc::new(StdMutex::new(Vec::new())),
                 })),
-                output: Box::new(FakeTransport {
+                output: SingleOutput::Transport(Box::new(FakeTransport {
                     receive: VecDeque::new(),
                     sent: Arc::clone(&sent),
-                }),
+                })),
                 video_decoder: Box::new(FakeVideoDecoder),
                 video_encoder: Box::new(FakeVideoEncoder),
                 audio_decoder: Box::new(FakeAudioDecoder),
@@ -1524,10 +1664,10 @@ mod tests {
             config,
             SinglePipelineBackends {
                 input: SingleInput::Packets(Box::new(FakePacketSource { packets })),
-                output: Box::new(FakeTransport {
+                output: SingleOutput::Transport(Box::new(FakeTransport {
                     receive: VecDeque::new(),
                     sent,
-                }),
+                })),
                 video_decoder: Box::new(FakeVideoDecoder),
                 video_encoder: Box::new(FakeVideoEncoder),
                 audio_decoder: Box::new(FakeAudioDecoder),
@@ -1577,10 +1717,10 @@ mod tests {
             config,
             SinglePipelineBackends {
                 input: SingleInput::Packets(Box::new(FakePacketSource { packets })),
-                output: Box::new(FakeTransport {
+                output: SingleOutput::Transport(Box::new(FakeTransport {
                     receive: VecDeque::new(),
                     sent: Arc::new(StdMutex::new(Vec::new())),
-                }),
+                })),
                 video_decoder: Box::new(FakeVideoDecoder),
                 video_encoder: Box::new(FakeVideoEncoder),
                 audio_decoder: Box::new(FakeAudioDecoder),
@@ -1600,6 +1740,60 @@ mod tests {
             .expect("RTMP state should be present");
         assert_eq!(rtmp.transport, "tcp");
         assert!(state.inputs[0].rtsp.is_none());
+        assert!(state.queues.iter().all(|queue| queue.depth == 0));
+    }
+
+    #[tokio::test]
+    async fn rtmp_packet_output_bypasses_ts_mux_and_receives_encoded_access_units() {
+        let config = PipelineConfig::from_yaml(include_str!("../../../examples/rtmp.yaml"))
+            .expect("RTMP output config");
+        let packets = VecDeque::from([
+            MediaPacket {
+                stream_id: 0,
+                codec: CodecId::H264,
+                pts: Timestamp::new(90_000, 90_000),
+                dts: Some(Timestamp::new(90_000, 90_000)),
+                duration: None,
+                keyframe: true,
+                discontinuity: false,
+                data: Bytes::from_static(&[0, 0, 0, 1, 0x65, 0x88]),
+            },
+            MediaPacket {
+                stream_id: 1,
+                codec: CodecId::AacLc,
+                pts: Timestamp::new(48_000, 48_000),
+                dts: None,
+                duration: Some(Timestamp::new(1_024, 48_000)),
+                keyframe: false,
+                discontinuity: false,
+                data: Bytes::from_static(&[
+                    0xff, 0xf1, 0x4c, 0x80, 0x01, 0x7f, 0xfc, 0x11, 0x22, 0x33, 0x44,
+                ]),
+            },
+        ]);
+        let sent = Arc::new(StdMutex::new(Vec::new()));
+        let pipeline = SinglePipeline::new(
+            config,
+            SinglePipelineBackends {
+                input: SingleInput::Packets(Box::new(FakePacketSource { packets })),
+                output: SingleOutput::Packets(Box::new(FakePacketSink {
+                    sent: Arc::clone(&sent),
+                })),
+                video_decoder: Box::new(FakeVideoDecoder),
+                video_encoder: Box::new(FakeVideoEncoder),
+                audio_decoder: Box::new(FakeAudioDecoder),
+                audio_encoder: Box::new(FakeAudioEncoder),
+            },
+        )
+        .expect("RTMP packet-output pipeline builds");
+
+        let state = pipeline.run().await.expect("packet output completes");
+        let sent = sent.lock().expect("sent lock");
+        assert_eq!(sent.len(), 2);
+        assert!(sent.iter().any(|packet| packet.codec == CodecId::H264));
+        assert!(sent.iter().any(|packet| packet.codec == CodecId::AacLc));
+        assert_eq!(state.output.video_encoded_frames, 1);
+        assert_eq!(state.output.audio_encoded_frames, 1);
         assert!(state.queues.iter().all(|queue| queue.depth == 0));
     }
 }

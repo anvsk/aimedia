@@ -390,11 +390,7 @@ pub fn compile(config: &PipelineConfig) -> Result<ExecutionPlan, CompileError> {
             NodeKind::Mux,
             MemoryDomain::Host,
             true,
-            if rtmp_output {
-                NodeStatus::Pending
-            } else {
-                NodeStatus::Implemented
-            },
+            NodeStatus::Implemented,
             if rtmp_output {
                 "FLV AVC/AAC tag mux with program millisecond timestamps".to_owned()
             } else {
@@ -406,11 +402,7 @@ pub fn compile(config: &PipelineConfig) -> Result<ExecutionPlan, CompileError> {
             NodeKind::TransportOutput,
             MemoryDomain::Host,
             true,
-            if rtmp_output {
-                NodeStatus::Pending
-            } else {
-                NodeStatus::AdapterReady
-            },
+            NodeStatus::AdapterReady,
             if rtmp_output {
                 "bounded RTMP/RTMPS publisher".to_owned()
             } else {
@@ -731,7 +723,7 @@ mod tests {
     }
 
     #[test]
-    fn compiles_rtmp_listener_into_direct_codec_edges_with_pending_output() {
+    fn compiles_rtmp_listener_and_publisher_into_direct_codec_edges() {
         let config = PipelineConfig::from_yaml(include_str!("../../../examples/rtmp.yaml"))
             .expect("RTMP contract should parse");
         let plan = compile(&config).expect("RTMP graph should compile");
@@ -748,10 +740,6 @@ mod tests {
             Some(MediaType::RtmpMessage)
         );
         assert!(plan.edges.iter().all(|edge| edge.queue.capacity > 0));
-        let pending = plan
-            .pending_nodes()
-            .map(|node| node.id.as_str())
-            .collect::<Vec<_>>();
-        assert_eq!(pending, ["mux.program", "output.program"]);
+        assert_eq!(plan.pending_nodes().count(), 0);
     }
 }

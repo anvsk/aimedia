@@ -1,6 +1,6 @@
 [package]
 name = "aimedia-rtmp"
-description = "Bounded Sans-I/O RTMP session adapter for aimedia"
+description = "Bounded RTMP/RTMPS packet source and sink for aimedia"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -16,7 +16,9 @@ bytes.workspace = true
 shiguredo_rtmp.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+tokio-rustls.workspace = true
 url.workspace = true
+webpki-roots.workspace = true
 
 [lints]
 workspace = true
