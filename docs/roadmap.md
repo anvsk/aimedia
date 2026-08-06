@@ -194,7 +194,7 @@ v0.3 工程。只有 V2-11 也完成后，总览才把 v0.2 标记为完全完�
     接收 sequence header 和 IDR 后才交付媒体。输入绕过 TS demux，直接进入既有 H.264/
     AAC 有界 codec 队列；`state` 增加 RTMP 连接、收包和重连指标。已有真实 TCP 握手、
     发布、音视频转换和 replacement publisher discontinuity 回环门禁；外部软件互操作
-    留在 V3-03F。
+    留在 V3-03F。证据：[PR #35](https://github.com/anvsk/aimedia/pull/35)。
   - [ ] V3-03E：RTMP/RTMPS publisher、rustls、输出重连、配置重发和 IDR 闸门。
   - [ ] V3-03F：OBS、FFmpeg、MediaMTX、至少两个真实平台 endpoint 的互操作、网络
     故障和两小时 soak；全部通过后才升级为 `supported`。
