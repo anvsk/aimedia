@@ -563,6 +563,12 @@ async fn command_run(path: &Path, dry_run: bool, mock: bool) -> Result<()> {
             .await
             .context("mock pipeline failed");
     }
+    if config.inputs.iter().any(|input| is_rtmp_uri(&input.uri)) || is_rtmp_uri(&config.output.uri)
+    {
+        bail!(
+            "rtmpDataPlanePending: RTMP/RTMPS and FLV are declared in the v0.3 graph, but the native adapter is not available yet; use `--dry-run` to inspect the bounded execution plan"
+        );
+    }
     if config.inputs.len() == 2 {
         bail!(
             "dualDataPlanePending: two-input native execution is scheduled for v0.3; use a \
@@ -570,6 +576,14 @@ async fn command_run(path: &Path, dry_run: bool, mock: bool) -> Result<()> {
         );
     }
     native::run(config).await
+}
+
+fn is_rtmp_uri(uri: &str) -> bool {
+    uri.get(..7)
+        .is_some_and(|scheme| scheme.eq_ignore_ascii_case("rtmp://"))
+        || uri
+            .get(..8)
+            .is_some_and(|scheme| scheme.eq_ignore_ascii_case("rtmps://"))
 }
 
 async fn command_control(socket: &Path, action: ControlAction) -> Result<()> {

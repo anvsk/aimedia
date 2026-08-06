@@ -1,0 +1,56 @@
+apiVersion: aimedia/v1alpha2
+kind: MediaJob
+metadata:
+  name: rtmp-to-rtmps-contract
+
+inputs:
+  - name: encoder
+    role: custom
+    uri: rtmp://0.0.0.0:1935/live
+    rtmp:
+      mode: listen
+      streamName: camera
+      connectTimeoutMs: 3000
+      handshakeTimeoutMs: 5000
+      readTimeoutMs: 10000
+      maxMessageBytes: 8388608
+      reconnect:
+        enabled: true
+        initialBackoffMs: 250
+        maxBackoffMs: 5000
+
+processing:
+  video:
+    width: 1920
+    height: 1080
+    fps: 30
+    bitrateKbps: 6000
+    gopMs: 1000
+    profile: main
+    bFrames: 0
+  audio:
+    sampleRate: 48000
+    channels: 2
+    bitrateKbps: 128
+  timing:
+    masterInput: 0
+    bufferMs: 1000
+    maxSkewMs: 80
+
+outputs:
+  - name: program
+    uri: rtmps://publish.example.test/live
+    rtmp:
+      mode: publish
+      streamNameRef:
+        env: AIMEDIA_RTMP_STREAM_NAME
+      connectTimeoutMs: 3000
+      handshakeTimeoutMs: 5000
+      readTimeoutMs: 10000
+      maxMessageBytes: 8388608
+      reconnect:
+        enabled: true
+        initialBackoffMs: 250
+        maxBackoffMs: 5000
+
+taps: []

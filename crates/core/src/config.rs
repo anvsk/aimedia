@@ -6,6 +6,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use url::Url;
 
 pub const API_VERSION: &str = "aimedia/v1alpha2";
 pub const KIND: &str = "MediaJob";
@@ -112,13 +113,7 @@ impl PipelineConfig {
             }
         }
 
-        validate_srt_uri(&self.output.uri, "outputs[0].uri", &mut errors);
-        validate_secret_ref(
-            self.output.secret_ref.as_ref(),
-            "outputs[0].secretRef",
-            &mut errors,
-        );
-        validate_srt(&self.output.srt, "outputs[0].srt", &mut errors);
+        validate_output_transport(&self.output, "outputs[0]", &mut errors);
 
         let video = &self.media.video;
         if video.width == 0 || video.width > 1920 {
@@ -254,6 +249,9 @@ fn validate_input_transport(input: &InputConfig, path: &str, errors: &mut Vec<St
         if input.rtsp.is_some() {
             errors.push(format!("{path}.rtsp must not be set for an srt:// input"));
         }
+        if input.rtmp.is_some() {
+            errors.push(format!("{path}.rtmp must not be set for an srt:// input"));
+        }
         validate_srt_uri(&input.uri, &format!("{path}.uri"), errors);
         validate_secret_ref(
             input.secret_ref.as_ref(),
@@ -275,6 +273,9 @@ fn validate_input_transport(input: &InputConfig, path: &str, errors: &mut Vec<St
                 "{path}.srt contains non-default values for an rtsp:// input"
             ));
         }
+        if input.rtmp.is_some() {
+            errors.push(format!("{path}.rtmp must not be set for an rtsp:// input"));
+        }
         validate_rtsp_uri(&input.uri, &format!("{path}.uri"), errors);
         match input.rtsp.as_ref() {
             Some(config) => validate_rtsp(config, &format!("{path}.rtsp"), errors),
@@ -285,8 +286,83 @@ fn validate_input_transport(input: &InputConfig, path: &str, errors: &mut Vec<St
         return;
     }
 
+    if has_scheme(&input.uri, "rtmp://") || has_scheme(&input.uri, "rtmps://") {
+        if input.secret_ref.is_some() {
+            errors.push(format!(
+                "{path}.secretRef is only for SRT passphrases; use {path}.rtmp.streamNameRef"
+            ));
+        }
+        if !input.srt.is_default_contract() {
+            errors.push(format!(
+                "{path}.srt contains non-default values for an RTMP input"
+            ));
+        }
+        if input.rtsp.is_some() {
+            errors.push(format!("{path}.rtsp must not be set for an RTMP input"));
+        }
+        validate_rtmp_uri(&input.uri, &format!("{path}.uri"), false, errors);
+        match input.rtmp.as_ref() {
+            Some(config) => validate_rtmp(
+                config,
+                &format!("{path}.rtmp"),
+                RtmpMode::Listen,
+                errors,
+            ),
+            None => errors.push(format!(
+                "{path}.rtmp is required for an rtmp:// input so the application and stream route are explicit"
+            )),
+        }
+        return;
+    }
+
     errors.push(format!(
-        "{path}.uri must use a currently declared input scheme: srt:// or rtsp://"
+        "{path}.uri must use a currently declared input scheme: srt://, rtsp://, or rtmp://"
+    ));
+}
+
+fn validate_output_transport(output: &OutputConfig, path: &str, errors: &mut Vec<String>) {
+    if has_scheme(&output.uri, "srt://") {
+        if output.rtmp.is_some() {
+            errors.push(format!("{path}.rtmp must not be set for an srt:// output"));
+        }
+        validate_srt_uri(&output.uri, &format!("{path}.uri"), errors);
+        validate_secret_ref(
+            output.secret_ref.as_ref(),
+            &format!("{path}.secretRef"),
+            errors,
+        );
+        validate_srt(&output.srt, &format!("{path}.srt"), errors);
+        return;
+    }
+
+    if has_scheme(&output.uri, "rtmp://") || has_scheme(&output.uri, "rtmps://") {
+        if output.secret_ref.is_some() {
+            errors.push(format!(
+                "{path}.secretRef is only for SRT passphrases; use {path}.rtmp.streamNameRef"
+            ));
+        }
+        if !output.srt.is_default_contract() {
+            errors.push(format!(
+                "{path}.srt contains non-default values for an RTMP output"
+            ));
+        }
+        validate_rtmp_uri(&output.uri, &format!("{path}.uri"), true, errors);
+        match output.rtmp.as_ref() {
+            Some(config) => validate_rtmp(
+                config,
+                &format!("{path}.rtmp"),
+                RtmpMode::Publish,
+                errors,
+            ),
+            None => errors.push(format!(
+                "{path}.rtmp is required for an RTMP output so the publishing stream is not embedded in the URI"
+            )),
+        }
+        return;
+    }
+
+    errors.push(format!(
+        "{path}.uri must use a currently declared output scheme: srt://, rtmp://, or rtmps://"
     ));
 }
 
@@ -416,6 +492,7 @@ impl MediaJob {
                 uri: config.output.uri,
                 secret_ref: config.output.secret_ref,
                 srt: config.output.srt,
+                rtmp: config.output.rtmp,
             }],
             taps: vec![TapConfig {
                 name: "director-signals".to_owned(),
@@ -460,6 +537,8 @@ pub struct JobOutputConfig {
     pub secret_ref: Option<SecretRef>,
     #[serde(default)]
     pub srt: SrtConfig,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rtmp: Option<RtmpConfig>,
 }
 
 impl From<JobOutputConfig> for OutputConfig {
@@ -468,6 +547,7 @@ impl From<JobOutputConfig> for OutputConfig {
             uri: output.uri,
             secret_ref: output.secret_ref,
             srt: output.srt,
+            rtmp: output.rtmp,
         }
     }
 }
@@ -635,6 +715,68 @@ fn validate_rtsp(config: &RtspConfig, path: &str, errors: &mut Vec<String>) {
     }
 }
 
+fn validate_rtmp(
+    config: &RtmpConfig,
+    path: &str,
+    expected_mode: RtmpMode,
+    errors: &mut Vec<String>,
+) {
+    if config.mode != expected_mode {
+        errors.push(format!(
+            "{path}.mode must be {} for this endpoint",
+            expected_mode.as_str()
+        ));
+    }
+    if !(100..=60_000).contains(&config.connect_timeout_ms) {
+        errors.push(format!(
+            "{path}.connectTimeoutMs must be between 100 and 60000"
+        ));
+    }
+    if !(500..=60_000).contains(&config.handshake_timeout_ms) {
+        errors.push(format!(
+            "{path}.handshakeTimeoutMs must be between 500 and 60000"
+        ));
+    }
+    if !(500..=120_000).contains(&config.read_timeout_ms) {
+        errors.push(format!(
+            "{path}.readTimeoutMs must be between 500 and 120000"
+        ));
+    }
+    if !(64 * 1024..=16 * 1024 * 1024).contains(&config.max_message_bytes) {
+        errors.push(format!(
+            "{path}.maxMessageBytes must be between 65536 and 16777216"
+        ));
+    }
+    validate_reconnect(&config.reconnect, &format!("{path}.reconnect"), errors);
+    validate_secret_ref(
+        config.stream_name_ref.as_ref(),
+        &format!("{path}.streamNameRef"),
+        errors,
+    );
+
+    match (&config.stream_name, &config.stream_name_ref) {
+        (Some(name), None) => {
+            if name.is_empty()
+                || name.len() > 512
+                || name.contains(['/', '\\', '?', '#', '\r', '\n'])
+            {
+                errors.push(format!(
+                    "{path}.streamName must be non-empty, at most 512 characters, and contain no path, query, fragment, or line-break delimiters"
+                ));
+            }
+            if contains_sensitive_stream_id(name) {
+                errors.push(format!(
+                    "{path}.streamName appears to contain a credential; use streamNameRef"
+                ));
+            }
+        }
+        (None, Some(_)) => {}
+        _ => errors.push(format!(
+            "{path} must set exactly one of streamName or streamNameRef"
+        )),
+    }
+}
+
 fn validate_reconnect(config: &ReconnectConfig, path: &str, errors: &mut Vec<String>) {
     if config.initial_backoff_ms == 0
         || config.initial_backoff_ms > config.max_backoff_ms
@@ -710,6 +852,47 @@ fn validate_rtsp_uri(uri: &str, path: &str, errors: &mut Vec<String>) {
     }
 }
 
+fn validate_rtmp_uri(uri: &str, path: &str, allow_tls: bool, errors: &mut Vec<String>) {
+    let parsed = match Url::parse(uri) {
+        Ok(parsed) => parsed,
+        Err(error) => {
+            errors.push(format!("{path} is not a valid RTMP base URI: {error}"));
+            return;
+        }
+    };
+    let scheme_is_rtmp = parsed.scheme().eq_ignore_ascii_case("rtmp");
+    let scheme_is_rtmps = parsed.scheme().eq_ignore_ascii_case("rtmps");
+    if !(scheme_is_rtmp || allow_tls && scheme_is_rtmps) {
+        let allowed = if allow_tls {
+            "rtmp:// or rtmps://"
+        } else {
+            "rtmp://"
+        };
+        errors.push(format!("{path} must use {allowed}"));
+    }
+    if parsed.host_str().is_none() {
+        errors.push(format!("{path} must include a host"));
+    }
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        errors.push(format!(
+            "{path} contains URI userinfo; use rtmp.streamNameRef for publishing credentials"
+        ));
+    }
+    if parsed.query().is_some() || parsed.fragment().is_some() {
+        errors.push(format!(
+            "{path} must be an application base URI without a query or fragment; put the stream route in rtmp.streamName or rtmp.streamNameRef"
+        ));
+    }
+    let has_application = parsed
+        .path_segments()
+        .is_some_and(|mut segments| segments.any(|segment| !segment.is_empty()));
+    if !has_application || parsed.path().ends_with('/') {
+        errors.push(format!(
+            "{path} must include an application path and must not end with '/'"
+        ));
+    }
+}
+
 fn has_scheme(uri: &str, scheme: &str) -> bool {
     uri.get(..scheme.len())
         .is_some_and(|actual| actual.eq_ignore_ascii_case(scheme))
@@ -753,6 +936,8 @@ pub struct InputConfig {
     pub srt: SrtConfig,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rtsp: Option<RtspConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rtmp: Option<RtmpConfig>,
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
@@ -772,6 +957,8 @@ pub struct OutputConfig {
     pub secret_ref: Option<SecretRef>,
     #[serde(default)]
     pub srt: SrtConfig,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rtmp: Option<RtmpConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -807,6 +994,8 @@ pub enum SecretError {
     ReadFile(PathBuf, std::io::Error),
     #[error("secret reference must set exactly one of env or file")]
     InvalidReference,
+    #[error("resolved secret value is invalid: {0}")]
+    InvalidValue(&'static str),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -949,6 +1138,66 @@ pub enum RtspTransport {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RtmpConfig {
+    pub mode: RtmpMode,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stream_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stream_name_ref: Option<SecretRef>,
+    #[serde(default = "default_connect_timeout")]
+    pub connect_timeout_ms: u64,
+    #[serde(default = "default_rtmp_handshake_timeout")]
+    pub handshake_timeout_ms: u64,
+    #[serde(default = "default_rtmp_read_timeout")]
+    pub read_timeout_ms: u64,
+    #[serde(default = "default_rtmp_max_message_bytes")]
+    pub max_message_bytes: u32,
+    #[serde(default)]
+    pub reconnect: ReconnectConfig,
+}
+
+impl RtmpConfig {
+    pub fn resolve_stream_name(&self) -> Result<String, SecretError> {
+        let value = match (&self.stream_name, &self.stream_name_ref) {
+            (Some(value), None) => Ok(value.clone()),
+            (None, Some(reference)) => reference.resolve(),
+            _ => Err(SecretError::InvalidReference),
+        }?;
+
+        if value.is_empty() {
+            return Err(SecretError::InvalidValue("stream name is empty"));
+        }
+        if value.len() > 1_024 {
+            return Err(SecretError::InvalidValue("stream name exceeds 1024 bytes"));
+        }
+        if value.contains(['\r', '\n']) {
+            return Err(SecretError::InvalidValue(
+                "stream name contains a line break",
+            ));
+        }
+
+        Ok(value)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RtmpMode {
+    Listen,
+    Publish,
+}
+
+impl RtmpMode {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Listen => "listen",
+            Self::Publish => "publish",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ReconnectConfig {
     #[serde(default = "default_true")]
     pub enabled: bool,
@@ -988,6 +1237,15 @@ const fn default_rtsp_read_timeout() -> u64 {
 }
 const fn default_rtsp_keepalive() -> u64 {
     15_000
+}
+const fn default_rtmp_handshake_timeout() -> u64 {
+    5_000
+}
+const fn default_rtmp_read_timeout() -> u64 {
+    10_000
+}
+const fn default_rtmp_max_message_bytes() -> u32 {
+    8 * 1024 * 1024
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1334,7 +1592,7 @@ impl Default for FailurePolicyConfig {
 #[cfg(test)]
 mod tests {
     use super::{
-        ConfigError, PipelineConfig, RtspTransport, convert_legacy_yaml, validate_srt_uri,
+        ConfigError, PipelineConfig, RtmpMode, RtspTransport, convert_legacy_yaml, validate_srt_uri,
     };
 
     #[test]
@@ -1439,5 +1697,55 @@ mod tests {
         let error = PipelineConfig::from_yaml(&cross_protocol)
             .expect_err("non-default SRT settings cannot leak into RTSP");
         assert!(error.to_string().contains("non-default values"));
+    }
+
+    #[test]
+    fn accepts_separate_rtmp_application_and_stream_contracts() {
+        let yaml = include_str!("../../../examples/rtmp.yaml");
+        let config = PipelineConfig::from_yaml(yaml).expect("RTMP contract should be valid");
+        let input = config.inputs[0]
+            .rtmp
+            .as_ref()
+            .expect("RTMP input keeps protocol-specific settings");
+        assert_eq!(input.mode, RtmpMode::Listen);
+        assert_eq!(input.stream_name.as_deref(), Some("camera"));
+        assert_eq!(input.max_message_bytes, 8 * 1024 * 1024);
+
+        let output = config
+            .output
+            .rtmp
+            .as_ref()
+            .expect("RTMPS output keeps protocol-specific settings");
+        assert_eq!(output.mode, RtmpMode::Publish);
+        assert_eq!(
+            output
+                .stream_name_ref
+                .as_ref()
+                .and_then(|reference| reference.env.as_deref()),
+            Some("AIMEDIA_RTMP_STREAM_NAME")
+        );
+    }
+
+    #[test]
+    fn rejects_rtmp_credentials_in_uri_and_cross_protocol_modes() {
+        let yaml = include_str!("../../../examples/rtmp.yaml");
+        let inline = yaml.replace(
+            "rtmps://publish.example.test/live",
+            "rtmps://user:secret@publish.example.test/live/key?token=secret",
+        );
+        let error = PipelineConfig::from_yaml(&inline).expect_err("URI credentials are rejected");
+        let message = error.to_string();
+        assert!(message.contains("URI userinfo"));
+        assert!(message.contains("query or fragment"));
+
+        let wrong_mode = yaml.replace("mode: listen", "mode: publish");
+        let error = PipelineConfig::from_yaml(&wrong_mode)
+            .expect_err("publisher mode cannot be used on an input listener");
+        assert!(error.to_string().contains("mode must be listen"));
+
+        let tls_listener = yaml.replace("rtmp://0.0.0.0:1935/live", "rtmps://0.0.0.0:443/live");
+        let error = PipelineConfig::from_yaml(&tls_listener)
+            .expect_err("RTMPS listener is outside the alpha contract");
+        assert!(error.to_string().contains("must use rtmp://"));
     }
 }

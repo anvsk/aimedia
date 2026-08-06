@@ -171,8 +171,24 @@ v0.3 工程。只有 V2-11 也完成后，总览才把 v0.2 标记为完全完�
       物理摄像机认证。
     - [ ] V3-02F2：至少两台不同厂商摄像机或两个 ONVIF 合规设备，记录型号、固件、
       H.264/AAC 或 G.711 profile 和鉴权结果。
-    - [ ] V3-02F3：外部 RTSP 1080p30 两小时门禁和支持矩阵最终升级。
-- [ ] **V3-03 RTMP/RTMPS 与 FLV**：输入、输出、FLV demux/mux。
+    - [ ] V3-02F3a：外部软件 RTSP 1080p30 两小时 GPU 门禁和证据报告。
+    - [ ] V3-02F3b：完成 V3-02F2 物理设备验证后，再决定是否升级支持矩阵；软件 soak
+      不能代替摄像机兼容性。
+- [ ] **V3-03 RTMP/RTMPS 与 FLV**：接收编码器发布并向国内外平台推流；不建设观众
+  播放、GOP cache 或 CDN。
+  - [x] V3-03A：配置契约、[RFC 0003](rfcs/0003-rtmp-flv.md)、pending 执行图、
+    `rtmpDataPlanePending` 稳定错误和示例。输入固定 RTMP listener，输出固定
+    RTMP/RTMPS publisher；URI 与 stream name 分离，所有队列仍有硬上限。证据：
+    [PR #32](https://github.com/anvsk/aimedia/pull/32)。
+  - [ ] V3-03B：短目录 `crates/rtmp` 的 Sans-I/O 会话适配器、消息上限、明文回环和
+    恶意分块恢复；候选依赖通过门禁后才精确固定。
+  - [ ] V3-03C：H.264 Annex-B/AVCC、SPS/PPS、AAC ADTS/raw 和 sequence header
+    双向转换。
+  - [ ] V3-03D：RTMP listener 输入接入单路原生运行时，断开后等待新 publisher、
+    sequence header 和 IDR。
+  - [ ] V3-03E：RTMP/RTMPS publisher、rustls、输出重连、配置重发和 IDR 闸门。
+  - [ ] V3-03F：OBS、FFmpeg、MediaMTX、至少两个真实平台 endpoint 的互操作、网络
+    故障和两小时 soak；全部通过后才升级为 `supported`。
 - [ ] **V3-04 HEVC Bridge**：H.265 输入转 H.264 输出。
 - [ ] **V3-05 格式归一化**：720p/1080p、25/30/50/60fps、横竖屏、44.1/48kHz
   和单/双声道。
