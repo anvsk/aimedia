@@ -98,6 +98,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "aimedia-rtmp"
+version = "0.2.0-alpha.1"
+dependencies = [
+ "aimedia-core",
+ "bytes",
+ "shiguredo_rtmp",
+ "thiserror",
+ "url",
+]
+
+[[package]]
 name = "aimedia-rtsp"
 version = "0.2.0-alpha.1"
 dependencies = [
@@ -1662,6 +1673,12 @@ checksum = "f40ca3c46823713e0d4209592e8d6e826aa57e928f09752619fc696c499637f6"
 dependencies = [
  "lazy_static",
 ]
+
+[[package]]
+name = "shiguredo_rtmp"
+version = "2026.1.0-canary.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "44a3ddf3112e8cfd27e5fd69f8b34d58dc4b7d62291a314a43cb1212b88a68bb"
 
 [[package]]
 name = "shlex"

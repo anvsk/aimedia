@@ -108,7 +108,7 @@ outputs:
 
 ## Rust 依赖决定
 
-协议核心首选且等待 V3-03B 门禁的候选版本是
+协议核心已精确固定为
 [`shiguredo_rtmp 2026.1.0-canary.6`](https://crates.io/crates/shiguredo_rtmp/2026.1.0-canary.6)：
 
 - Apache-2.0、Rust 1.88、零第三方依赖、`no_std`、Sans-I/O。
@@ -116,11 +116,12 @@ outputs:
 - socket、超时、rustls、任务和背压由 aimedia 持有，不把 Tokio runtime 藏进协议库。
 - 在 aimedia 的 Rust 1.88 工具链上，上游 89 项 library tests 全部通过。
 
-它仍是 canary，不能未经隔离直接泄漏到公共 API。V3-03B 必须先在短目录
-`crates/rtmp` 中完成回环、最大 message、恶意 chunk stream、发送缓冲和断线测试，再把
-依赖加入 workspace；所有上游类型都留在 crate 内部。若这些门禁失败，回退到自有小型
-状态机或重新评估 [`rtmp-rs`](https://github.com/torresjeff/rtmp-rs)，不让应用层绑定某个
-候选库。
+它仍是 canary，不能直接泄漏到公共 API。V3-03B 已在短目录 `crates/rtmp` 中完成明文
+发布回环、最大 message、恶意 chunk stream、控制发送缓冲、断线隔离和流名脱敏门禁，
+上游类型全部留在 crate 内部。入口保险丝先解析 RTMP chunk header，再把合格字节交给
+协议状态机，避免仅依赖上游内部缓冲策略。若后续互操作发现协议缺口，可在不改变 runtime
+公共接口的前提下替换为自有小型状态机或重新评估
+[`rtmp-rs`](https://github.com/torresjeff/rtmp-rs)。
 
 未选择的主要候选：
 

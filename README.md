@@ -91,6 +91,7 @@ crates/
   graph/     目标配置到 ExecutionPlan 的编译器
   mpegts/    clean-room MPEG-TS
   nvidia/    CUDA、NVDEC、NVENC 边界
+  rtmp/      有界 Sans-I/O RTMP 会话边界
   runtime/   有界执行器和作业控制
   rtsp/      RTSP/RTP 输入边界
   srt/       libsrt adapter
