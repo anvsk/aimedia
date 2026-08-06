@@ -24,8 +24,8 @@ Git 基线：`main` 的 `acc06d2`，交付分支 `codex/feat/rtmp-soak`
 | RTSP schema、TCP 会话、H.264/AAC/G.711、重连、HEVC access unit | 已合并 | PR #26—#30 |
 | RTSP 外部软件短门禁 | 已合并 | PR #31；`docs/reports/rtsp.md` |
 | RTMP/FLV 契约、会话、AVC/AAC 转换、listener、RTMP/RTMPS publisher | 已合并 | PR #32—#36 |
-| RTMP FFmpeg -> aimedia -> MediaMTX 180/420 秒故障门禁 | 本交付 | `docs/reports/rtmp.md` |
-| RTMP publisher ACK 竞态修复 | 本交付 | `anvsk/rtmp-rs@00e97a6`；本分支 |
+| RTMP FFmpeg -> aimedia -> MediaMTX 180/420 秒故障门禁 | 本交付 | PR #38；`docs/reports/rtmp.md` |
+| RTMP publisher ACK 竞态修复 | 本交付 | PR #38；`anvsk/rtmp-rs@00e97a6` |
 | RTMP OBS、真实平台、完整两小时 soak | 未完成 | 保持 `experimental` |
 | v0.4 多输出与 AI Tap | 未开始 | 暂停期间不要开发 |
 
