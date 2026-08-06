@@ -178,7 +178,8 @@ v0.3 工程。只有 V2-11 也完成后，总览才把 v0.2 标记为完全完�
   播放、GOP cache 或 CDN。
   - [x] V3-03A：配置契约、[RFC 0003](rfcs/0003-rtmp-flv.md)、pending 执行图、
     `rtmpDataPlanePending` 稳定错误和示例。输入固定 RTMP listener，输出固定
-    RTMP/RTMPS publisher；URI 与 stream name 分离，所有队列仍有硬上限。
+    RTMP/RTMPS publisher；URI 与 stream name 分离，所有队列仍有硬上限。证据：
+    [PR #32](https://github.com/anvsk/aimedia/pull/32)。
   - [ ] V3-03B：短目录 `crates/rtmp` 的 Sans-I/O 会话适配器、消息上限、明文回环和
     恶意分块恢复；候选依赖通过门禁后才精确固定。
   - [ ] V3-03C：H.264 Annex-B/AVCC、SPS/PPS、AAC ADTS/raw 和 sequence header
