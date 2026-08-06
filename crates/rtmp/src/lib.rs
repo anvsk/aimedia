@@ -1,16 +1,18 @@
 //! Bounded RTMP protocol boundary for aimedia.
 //!
-//! The crate deliberately performs no socket or TLS I/O. It wraps the selected RTMP state
-//! machine behind aimedia-owned types and rejects oversized messages and chunk-stream sprays
-//! before they reach the protocol decoder.
+//! Protocol state, TCP listener/publisher I/O, and authenticated RTMPS are kept behind
+//! aimedia-owned packet source/sink traits. Oversized messages and chunk-stream sprays are
+//! rejected before they can grow protocol buffers without a configured bound.
 
 mod aac;
 mod avc;
 mod ingress;
+mod sink;
 mod source;
 
 pub use aac::{AacAccessUnit, AacError, AacIngest, AacPublisher};
 pub use avc::{AvcAccessUnit, AvcError, AvcIngest, AvcPublisher};
+pub use sink::RtmpPacketSink;
 pub use source::RtmpPacketSource;
 
 use std::fmt;
@@ -440,7 +442,10 @@ impl PublishSession {
         let stream_name = stream_name.into();
         validate_resolved_stream_name(&stream_name)?;
         let endpoint = parse_endpoint(uri, true)?;
-        let url = RtmpUrl::parse_with_stream_name(uri, &stream_name)
+        let normalized_uri = Url::parse(uri)
+            .map_err(|_| invalid_endpoint("RTMP publisher endpoint is invalid"))?
+            .to_string();
+        let url = RtmpUrl::parse_with_stream_name(&normalized_uri, &stream_name)
             .map_err(|_| invalid_endpoint("RTMP publisher endpoint is invalid"))?;
         let connection = RtmpPublishClientConnection::new(url);
         if connection.send_buf().len() > MAX_CONTROL_SEND_BYTES {
@@ -679,7 +684,7 @@ impl fmt::Debug for PublishSession {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct Endpoint {
     host: String,
     port: u16,
@@ -707,9 +712,8 @@ fn parse_endpoint(uri: &str, allow_tls: bool) -> Result<Endpoint, RtmpError> {
         .filter(|host| !host.is_empty())
         .ok_or_else(|| invalid_endpoint("RTMP endpoint has no host"))?
         .to_owned();
-    let port = url
-        .port_or_known_default()
-        .ok_or_else(|| invalid_endpoint("RTMP endpoint has no valid port"))?;
+    // `url` intentionally has no built-in defaults for the non-special rtmp/rtmps schemes.
+    let port = url.port().unwrap_or(if tls { 443 } else { 1935 });
     let app = url.path().trim_start_matches('/').to_owned();
     if app.is_empty() || app.ends_with('/') || app.contains('%') {
         return Err(invalid_endpoint(
@@ -858,6 +862,26 @@ mod tests {
         assert_eq!(
             listener.feed(&[]).unwrap_err().code,
             RtmpErrorCode::InvalidState
+        );
+    }
+
+    #[test]
+    fn endpoint_uses_protocol_default_ports() {
+        assert_eq!(
+            parse_endpoint("rtmp://publish.example.test/live", true)
+                .unwrap()
+                .port,
+            1935
+        );
+        assert_eq!(
+            parse_endpoint("rtmps://publish.example.test/live", true)
+                .unwrap()
+                .port,
+            443
+        );
+        assert!(
+            PublishSession::new("RTMPS://publish.example.test/live", "program", 1024 * 1024)
+                .is_ok()
         );
     }
 }

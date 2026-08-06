@@ -5,11 +5,11 @@ use aimedia_core::{
     config::RtspTransport,
 };
 use aimedia_nvidia::{NvdecConfig, NvdecDecoder, NvencConfig, NvencEncoder};
-use aimedia_rtmp::RtmpPacketSource;
+use aimedia_rtmp::{RtmpPacketSink, RtmpPacketSource};
 use aimedia_rtsp::{G711Decoder, RtspCodec, RtspEndpoint, RtspMediaProfile, RtspPacketSource};
 use aimedia_runtime::{
     ControlServer,
-    single::{SingleInput, SinglePipeline, SinglePipelineBackends},
+    single::{SingleInput, SingleOutput, SinglePipeline, SinglePipelineBackends},
 };
 use aimedia_srt::{Endpoint, SrtTransport};
 use anyhow::{Context, Result, anyhow, bail};
@@ -104,13 +104,6 @@ async fn build_backends(config: &PipelineConfig) -> Result<SinglePipelineBackend
     })
     .context("could not initialize the NVENC H.264 encoder")?;
 
-    let output_endpoint = Endpoint::from_config(
-        &config.output.uri,
-        &config.output.srt,
-        config.output.secret_ref.as_ref(),
-    )
-    .context("could not prepare the SRT output")?;
-
     let (input, audio_decoder): (SingleInput, Box<dyn AudioDecoder>) = if input
         .uri
         .get(..7)
@@ -188,13 +181,42 @@ async fn build_backends(config: &PipelineConfig) -> Result<SinglePipelineBackend
         )
     };
 
-    let output_transport = SrtTransport::connect(output_endpoint)
-        .await
-        .context("could not establish the initial SRT output connection")?;
+    let output = if config
+        .output
+        .uri
+        .get(..7)
+        .is_some_and(|scheme| scheme.eq_ignore_ascii_case("rtmp://"))
+        || config
+            .output
+            .uri
+            .get(..8)
+            .is_some_and(|scheme| scheme.eq_ignore_ascii_case("rtmps://"))
+    {
+        let rtmp = config
+            .output
+            .rtmp
+            .as_ref()
+            .ok_or_else(|| anyhow!("rtmpConfigRequired: RTMP output requires output.rtmp"))?;
+        let sink = RtmpPacketSink::connect(&config.output.uri, rtmp)
+            .await
+            .context("could not establish the initial RTMP/RTMPS publishing session")?;
+        SingleOutput::Packets(Box::new(sink))
+    } else {
+        let output_endpoint = Endpoint::from_config(
+            &config.output.uri,
+            &config.output.srt,
+            config.output.secret_ref.as_ref(),
+        )
+        .context("could not prepare the SRT output")?;
+        let output_transport = SrtTransport::connect(output_endpoint)
+            .await
+            .context("could not establish the initial SRT output connection")?;
+        SingleOutput::Transport(Box::new(output_transport))
+    };
 
     Ok(SinglePipelineBackends {
         input,
-        output: Box::new(output_transport),
+        output,
         video_decoder: Box::new(video_decoder),
         video_encoder: Box::new(video_encoder),
         audio_decoder,

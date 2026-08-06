@@ -109,7 +109,9 @@ dependencies = [
  "shiguredo_rtmp",
  "thiserror",
  "tokio",
+ "tokio-rustls",
  "url",
+ "webpki-roots",
 ]
 
 [[package]]

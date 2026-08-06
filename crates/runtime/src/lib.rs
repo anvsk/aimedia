@@ -12,8 +12,8 @@ use aimedia_core::{
     CameraSnapshot, ControlCommand, ControlErrorCode, ControlRequest, ControlResponse, Director,
     FastSignals, GpuSurfaceRuntimeStats, InputCodecRuntimeStats, InputRuntimeState,
     LatencyRuntimeStats, OutputRuntimeState, PipelineConfig, PipelineMode, PipelineRuntimeState,
-    QueueRuntimeState, RtmpRuntimeStats, RtspRuntimeStats, SrtRuntimeStats, SwitchReason,
-    backend::CodecId,
+    QueueRuntimeState, RtmpOutputRuntimeStats, RtmpRuntimeStats, RtspRuntimeStats, SrtRuntimeStats,
+    SwitchReason, backend::CodecId,
 };
 pub use aimedia_graph::QueueCapacities;
 use aimedia_graph::{
@@ -517,6 +517,10 @@ impl Controller {
         self.output_state.srt = stats;
     }
 
+    fn set_output_rtmp(&mut self, stats: RtmpOutputRuntimeStats) {
+        self.output_state.rtmp = Some(stats);
+    }
+
     fn set_gpu_surfaces(&mut self, index: usize, stats: GpuSurfaceRuntimeStats) {
         if index < self.input_count {
             self.input_states[index].gpu = stats;
@@ -923,6 +927,10 @@ impl ControllerHandle {
 
     pub(crate) async fn set_output_srt(&self, stats: SrtRuntimeStats) {
         self.inner.lock().await.set_output_srt(stats);
+    }
+
+    pub(crate) async fn set_output_rtmp(&self, stats: RtmpOutputRuntimeStats) {
+        self.inner.lock().await.set_output_rtmp(stats);
     }
 
     pub(crate) async fn set_gpu_surfaces(&self, index: usize, stats: GpuSurfaceRuntimeStats) {

@@ -248,6 +248,17 @@ pub struct RtmpRuntimeStats {
     pub last_data_age_ms: Option<u64>,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RtmpOutputRuntimeStats {
+    pub connected: bool,
+    pub transport: String,
+    pub packets_sent: u64,
+    pub reconnects: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_send_age_ms: Option<u64>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct InputRuntimeState {
@@ -304,6 +315,8 @@ pub struct OutputRuntimeState {
     pub audio_dropped_frames: u64,
     pub engine_latency: LatencyRuntimeStats,
     pub srt: SrtRuntimeStats,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rtmp: Option<RtmpOutputRuntimeStats>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

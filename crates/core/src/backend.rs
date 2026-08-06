@@ -174,6 +174,42 @@ pub struct PacketSourceRuntimeStats {
     pub last_data_age_ms: Option<u64>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PacketSinkOutcome {
+    Sent,
+    DroppedAwaitingKeyframe,
+}
+
+/// Push-based output for protocols that package codec access units directly.
+///
+/// SRT uses [`Transport`] after MPEG-TS muxing. RTMP/RTMPS enters its protocol adapter through
+/// this trait so H.264 and AAC are not serialized into a temporary transport stream.
+#[async_trait]
+pub trait PacketSink: Send {
+    async fn send_packet(&mut self, packet: MediaPacket)
+    -> Result<PacketSinkOutcome, BackendError>;
+    async fn close(&mut self) -> Result<(), BackendError>;
+
+    fn observer(&self) -> Option<Arc<dyn PacketSinkObserver>> {
+        None
+    }
+}
+
+#[async_trait]
+pub trait PacketSinkObserver: Send + Sync {
+    async fn stats(&self) -> Result<PacketSinkRuntimeStats, BackendError>;
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PacketSinkRuntimeStats {
+    pub protocol: String,
+    pub connected: bool,
+    pub transport: String,
+    pub packets_sent: u64,
+    pub reconnects: u64,
+    pub last_send_age_ms: Option<u64>,
+}
+
 pub trait GpuSurfaceObserver: Send + Sync {
     fn stats(&self) -> GpuSurfaceRuntimeStats;
 }

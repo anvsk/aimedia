@@ -195,7 +195,13 @@ v0.3 工程。只有 V2-11 也完成后，总览才把 v0.2 标记为完全完�
     AAC 有界 codec 队列；`state` 增加 RTMP 连接、收包和重连指标。已有真实 TCP 握手、
     发布、音视频转换和 replacement publisher discontinuity 回环门禁；外部软件互操作
     留在 V3-03F。证据：[PR #35](https://github.com/anvsk/aimedia/pull/35)。
-  - [ ] V3-03E：RTMP/RTMPS publisher、rustls、输出重连、配置重发和 IDR 闸门。
+  - [x] V3-03E：短文件 `crates/rtmp/src/sink.rs` 完成 RTMP/RTMPS publisher、rustls
+    WebPKI 公开信任根证书校验、输出重连、配置重发和 IDR 闸门。编码后的 H.264 Annex-B/AAC ADTS
+    直接进入 packet sink，不绕行 MPEG-TS；断线期间逐包丢弃而不建立媒体历史队列，后台
+    指数退避连接成功后仍拒绝音频和非 IDR，直到新的 SPS/PPS + IDR 到达。`state` 可查询
+    TLS/TCP、连接状态、已发包和重连次数。证据：真实 TCP publisher/listener loopback、
+    首帧配置顺序、断线重连和新 IDR 门禁测试，以及 Linux workspace 全量测试；外部软件
+    与真实平台证据留在 V3-03F。交付：[PR #36](https://github.com/anvsk/aimedia/pull/36)。
   - [ ] V3-03F：OBS、FFmpeg、MediaMTX、至少两个真实平台 endpoint 的互操作、网络
     故障和两小时 soak；全部通过后才升级为 `supported`。
 - [ ] **V3-04 HEVC Bridge**：H.265 输入转 H.264 输出。

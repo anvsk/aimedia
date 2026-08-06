@@ -40,7 +40,7 @@ RTMP 是连接、握手、命令和分块传输协议；FLV tag 是这条连接�
 ## P0 媒体约束
 
 - 输入：RTMP listener，单端点同时只接受一个 publisher。
-- 输出：RTMP 或 RTMPS publisher；RTMPS 使用 rustls 和系统信任根，禁止关闭证书校验。
+- 输出：RTMP 或 RTMPS publisher；RTMPS 使用 rustls 和公开 WebPKI 信任根，禁止关闭证书校验。
 - 视频：传统 FLV AVC tag 中的 H.264 8-bit 4:2:0；不接受 Enhanced RTMP codec。
 - 音频：AAC-LC；不接受 MP3、Opus 或厂商私有音频 tag。
 - 分辨率、帧率和采样率仍受当前 MediaJob profile 限制。
@@ -136,7 +136,14 @@ V3-03D 在同一短目录新增 `source.rs`，由 aimedia 自己持有 `TcpListe
 生命周期。listener 产生的 FLV 音视频 tag 先被转换为公共 `MediaPacket`，再直接进入
 H.264/AAC codec 队列，因此不会为了 RTMP 复制一套运行时，也不会错误经过 MPEG-TS
 demux。替换 publisher 时重建协议与 AVC/AAC 转换状态，并给两条媒体流各标记一次
-discontinuity；旧连接的待处理媒体不会跨会话保留。RTMP 输出仍由 V3-03E 单独交付。
+discontinuity；旧连接的待处理媒体不会跨会话保留。
+
+V3-03E 新增同级短文件 `sink.rs`。运行时的 packet sink 直接接收编码后的 H.264 Annex-B
+与 AAC ADTS，不先封装成临时 MPEG-TS。明文 RTMP 使用 TCP；RTMPS 使用 rustls 和公开
+WebPKI 信任根，校验证书与主机名且没有“不安全跳过”开关。网络写失败后当前 access unit
+立即丢弃，连接在独立有界任务中指数退避；恢复后 AVC/AAC 转换器清空，音频和非 IDR
+视频继续丢弃，直到新的 SPS/PPS + IDR 到达。这样平台不会看到跨连接拼接的 GOP，媒体
+主链也不会被数秒连接超时或无限历史队列拖住。
 
 未选择的主要候选：
 

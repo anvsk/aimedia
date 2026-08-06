@@ -38,9 +38,11 @@ serde_yaml = "0.9.34"
 shiguredo_rtmp = "=2026.1.0-canary.6"
 thiserror = "2.0.12"
 tokio = { version = "1.45.1", features = ["fs", "io-util", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+tokio-rustls = { version = "0.26.4", default-features = false, features = ["ring", "tls12"] }
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter", "fmt"] }
 url = "2.5.4"
+webpki-roots = "1.0.9"
 
 [workspace.lints.rust]
 missing_debug_implementations = "warn"
