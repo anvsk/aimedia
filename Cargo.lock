@@ -102,6 +102,7 @@ name = "aimedia-rtmp"
 version = "0.2.0-alpha.1"
 dependencies = [
  "aimedia-core",
+ "aimedia-mpegts",
  "bytes",
  "shiguredo_rtmp",
  "thiserror",
