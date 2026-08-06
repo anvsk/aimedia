@@ -101,12 +101,39 @@ function Wait-ContainerExit {
     throw "$Name did not exit within $TimeoutSeconds seconds"
 }
 
+$script:lastControlError = "not queried"
+
 function Get-State {
-    $stateText = & docker exec $engine aimedia control state --json 2>$null
-    if ($LASTEXITCODE -ne 0) {
-        return $null
+    param(
+        [ValidateRange(1, 20)]
+        [int]$Attempts = 1,
+        [ValidateRange(0, 5000)]
+        [int]$DelayMilliseconds = 250
+    )
+
+    for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
+        $stateText = & docker exec $engine aimedia control state --json 2>&1
+        $exitCode = $LASTEXITCODE
+        if ($exitCode -eq 0) {
+            try {
+                $state = (($stateText -join [Environment]::NewLine) | ConvertFrom-Json).state
+                $script:lastControlError = ""
+                return $state
+            }
+            catch {
+                $script:lastControlError = "invalid control JSON: $($_.Exception.Message)"
+            }
+        }
+        else {
+            $detail = (($stateText | ForEach-Object { "$_" }) -join " ").Trim()
+            $script:lastControlError = "docker exec exited ${exitCode}: $detail"
+        }
+
+        if ($attempt -lt $Attempts -and $DelayMilliseconds -gt 0) {
+            Start-Sleep -Milliseconds $DelayMilliseconds
+        }
     }
-    return (($stateText -join [Environment]::NewLine) | ConvertFrom-Json).state
+    return $null
 }
 
 function Wait-Control {
@@ -278,9 +305,11 @@ function Get-GpuMemory {
 function Get-Sample {
     param([Parameter(Mandatory)][Diagnostics.Stopwatch]$Timer)
 
-    $state = Get-State
+    $state = Get-State -Attempts 5 -DelayMilliseconds 500
     if ($null -eq $state) {
-        throw "control state became unavailable while the RTMP pipeline was running"
+        $engineStatus = (& docker inspect -f "{{.State.Status}}/{{.State.ExitCode}}" $engine 2>&1) `
+            -join " "
+        throw "control state unavailable after retries; engine=$engineStatus; last=$script:lastControlError"
     }
     $status = Invoke-Docker -Arguments @("exec", $engine, "cat", "/proc/1/status") -Capture
     $rssLine = $status | Where-Object { $_ -match "^VmRSS:" } | Select-Object -First 1
@@ -349,7 +378,7 @@ function Read-Probe {
     $output = Invoke-Docker -Arguments @(
         "run", "--rm", "-v", "${runRoot}:/work:ro",
         "--entrypoint", "ffprobe", $PeerImage,
-        "-v", "error", "-show_streams", "-show_packets", "-of", "json", "/work/$FileName"
+        "-v", "quiet", "-show_streams", "-show_packets", "-of", "json", "/work/$FileName"
     ) -Capture
     $report = ($output -join [Environment]::NewLine) | ConvertFrom-Json
     $video = @($report.packets | Where-Object codec_type -eq "video")

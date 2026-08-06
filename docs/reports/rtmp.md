@@ -2,13 +2,14 @@
 
 ## 结论
 
-2026-08-06 的 180 秒门禁验证了以下真实链路：
+2026-08-06 的 180 秒门禁和后续 420 秒故障回归验证了以下真实链路：
 
 `FFmpeg RTMP -> aimedia GPU -> aimedia RTMP -> MediaMTX -> FFmpeg/ffprobe`
 
 测试包含输入 publisher 中断、输出 MediaMTX 中断，以及 40ms RTT、20ms 抖动、1%
-丢包。全部自动 gate 通过。它证明 FFmpeg、MediaMTX 和明文 RTMP 的短时互操作及故障
-恢复，不替代 OBS、RTMPS 真实平台或两小时稳定性验证，因此状态仍是 `experimental`。
+丢包。全部自动 gate 通过。420 秒回归还跨过了多个 RTMP ACK 窗口，输入和输出各只有
+一次计划内重连。它证明 FFmpeg、MediaMTX 和明文 RTMP 的短时互操作及故障恢复，不替代
+OBS、RTMPS 真实平台或两小时稳定性验证，因此状态仍是 `experimental`。
 
 ## 可复现环境
 
@@ -55,6 +56,30 @@ pwsh ./tools/rtmp.ps1 `
 网络损伤在 110—130 秒注入。结束时输入和输出均为连接状态，输出断线期间没有建立
 历史媒体队列；重连后从新的 SPS/PPS 与 IDR 恢复，节目时钟没有回退。
 
+### 420 秒 ACK 与重连回归
+
+修复后镜像 `sha256:ea041dba0836edd9d9d6774553ee49f5a55579cf185df793f022936f42b3435d`
+通过 420 秒回归。输入在 60 秒中断 8 秒，输出在 300 秒中断 8 秒，350—370 秒注入
+40ms RTT、20ms 抖动和 1% 丢包：
+
+| 检查项 | 结果 |
+|---|---:|
+| 输入重连 | 1 次，与计划故障一致 |
+| 输出重连 | 1 次，与计划故障一致；无周期性额外重连 |
+| 引擎延迟 | p50 67ms；p95 141ms；max 250ms |
+| 输入/输出包 | 31,402 / 31,250 |
+| 视频/音频编码帧 | 12,466 / 19,526 |
+| 基线与恢复 | H.264/AAC，PTS 单调，首视频包均为 keyframe |
+| RSS 变化 | +24 MiB，低于 64 MiB 短测门槛 |
+| 隔离拓扑设备显存 | 178 -> 180 MiB，增长 2 MiB |
+| 队列与 surface | 队列最高 1/1；NVDEC surface 最高 3/4 |
+
+本机完整汇总位于
+`C:\Users\anvsk\AppData\Local\Temp\aimedia-rtmp-4a25bf85\summary.json`。临时目录不是
+长期发布存储；SHA-256 为
+`E3E4348857BF4DF4DD4B4040E06E8D73AD6B23CA3B229991BC1D0021EF7C6A5A`。V3-03F4
+完成时仍需保存两小时原始证据。
+
 ## 外部测试发现并修复的问题
 
 1. FFmpeg 在握手后先发送 `Set Chunk Size`，再发送 `connect`。固定的 RTMP 协议库会在
@@ -66,6 +91,17 @@ pwsh ./tools/rtmp.ps1 `
    改为按墙钟向 FFmpeg 发送中断，既采满 15 秒又保留原始节目 PTS。
 4. RTMP 会话失败现在记录协议阶段、稳定错误类别和不含 stream name 的原因，便于区分
    TCP、握手、命令和媒体阶段问题。
+5. 已建立的 publisher 会话曾把协议终止映射为不可恢复的处理错误，输出接收端故障会
+   终止整个管线。现在建立后的协议/TCP 故障统一进入有界输出重连；握手和配置错误仍在
+   建连阶段返回稳定错误。
+6. `shiguredo_rtmp 2026.1.0-canary.6` 在累计发送约 2.5 MB 时可能先于对端 ACK 的网络
+   往返进入 `Disconnecting`。pcap 证明 MediaMTX 已返回序号 `2,500,256` 的 ACK，但
+   依赖发送侧在同一边界先判定超时。aimedia 精确固定
+   [`anvsk/rtmp-rs@00e97a6`](https://github.com/anvsk/rtmp-rs/commit/00e97a651d0a08a5b7e4837cc2ad8b4701bc2e9a)：
+   对齐 peer bandwidth 窗口，并允许宿主关闭依赖内部的 missing-ACK 主动断连。ACK 仍然
+   正常收发，真正的故障继续由有界缓冲、TCP 写超时和 aimedia 重连状态机处理。
+7. 网络损伤时 ffprobe 会把 FLV 警告写到 stderr；PowerShell Docker 包装器合并输出后
+   导致 JSON 解析失败。门禁改用 `ffprobe -v quiet`，状态查询也增加有限重试与明确诊断。
 
 ## 原始证据
 
@@ -80,6 +116,13 @@ pwsh ./tools/rtmp.ps1 `
 
 临时目录不是长期发布存储。两小时门禁完成时，应将原始 summary 和 samples 作为
 Release 附件保存并在报告中记录下载地址与哈希。
+
+2026-08-06 另启动了一次两小时门禁，按用户要求在 2,911 秒（98 个 30 秒样本）主动
+停止并清理容器，因此没有 `summary.json`，不能算作 V3-03F4 通过。停止前输入/输出均
+连接，重连计数分别为 1/1，延迟 p95 72ms，RSS 为 240,205,824 bytes，隔离设备显存
+180 MiB，队列最高 1/1，surface 最高 3/4。部分证据位于
+`C:\Users\anvsk\AppData\Local\Temp\aimedia-rtmp-12e42279`；`samples.jsonl` 的 SHA-256
+为 `E61989631B192B7B3EED8FC6C4B6BF0A1968736A4B234C6B5644C269BB2333E9`。
 
 ## 尚未完成
 

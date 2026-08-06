@@ -21,3 +21,4 @@ allow = [
 [sources]
 unknown-git = "deny"
 unknown-registry = "deny"
+allow-git = ["https://github.com/anvsk/rtmp-rs.git"]

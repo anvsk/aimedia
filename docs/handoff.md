@@ -2,9 +2,9 @@
 
 更新时间：2026-08-06
 
-暂停点：V3-03F 的 FFmpeg + MediaMTX 短时互操作与故障门禁完成后
+暂停点：V3-03F1 的 RTMP 长连接 ACK 修复与 420 秒故障回归完成后
 
-Git 基线：`main` 的 `cd9af02`，交付分支 `codex/feat/rtmp-interop`
+Git 基线：`main` 的 `acc06d2`，交付分支 `codex/feat/rtmp-soak`
 
 ## 先读结论
 
@@ -24,13 +24,19 @@ Git 基线：`main` 的 `cd9af02`，交付分支 `codex/feat/rtmp-interop`
 | RTSP schema、TCP 会话、H.264/AAC/G.711、重连、HEVC access unit | 已合并 | PR #26—#30 |
 | RTSP 外部软件短门禁 | 已合并 | PR #31；`docs/reports/rtsp.md` |
 | RTMP/FLV 契约、会话、AVC/AAC 转换、listener、RTMP/RTMPS publisher | 已合并 | PR #32—#36 |
-| RTMP FFmpeg -> aimedia -> MediaMTX 短门禁 | 本交付 | `docs/reports/rtmp.md` |
-| RTMP OBS、真实平台、两小时 soak | 未完成 | 保持 `experimental` |
+| RTMP FFmpeg -> aimedia -> MediaMTX 180/420 秒故障门禁 | 本交付 | PR #38；`docs/reports/rtmp.md` |
+| RTMP publisher ACK 竞态修复 | 本交付 | PR #38；`anvsk/rtmp-rs@00e97a6` |
+| RTMP OBS、真实平台、完整两小时 soak | 未完成 | 保持 `experimental` |
 | v0.4 多输出与 AI Tap | 未开始 | 暂停期间不要开发 |
 
-V3-03F 短门禁在 RTX 5060 Laptop + 577.12 上运行 180 秒。输入和输出各恢复一次，
-网络损伤为 40ms RTT、20ms 抖动、1% 丢包；p95 142ms，音视频 PTS 单调，恢复片段首
-视频包为 keyframe，所有队列和 GPU surface 未越界，运行镜像无 FFmpeg/libav。
+V3-03F 短门禁在 RTX 5060 Laptop + 577.12 上运行 180 秒。修复 ACK 竞态后又运行
+420 秒：输入和输出各只有一次计划内重连，网络损伤为 40ms RTT、20ms 抖动、1% 丢包；
+p95 141ms，音视频 PTS 单调，恢复片段首视频包为 keyframe，队列最高 1/1、surface
+最高 3/4，运行镜像无 FFmpeg/libav。
+
+两小时测试使用相同镜像启动，按用户要求在 2,911 秒主动停止，容器与网络已清理。停止
+前输入/输出仍连接，重连 1/1，p95 72ms，RSS 约 229 MiB，隔离设备显存 180 MiB；因为
+没有跑满且没有生成最终 `summary.json`，V3-03F4 必须保持未完成。
 
 ## 当前代码结构
 
@@ -70,7 +76,14 @@ FFmpeg 和 MediaMTX 只属于测试端，不进入运行镜像。
 
 按以下顺序关闭门槛：
 
-1. 跑 1080p30 两小时门禁并保存 summary/samples 到 GitHub Release：
+1. 复用 `tools/obs.py` 的隔离 HOME 和 obs-websocket 方式，增加 OBS RTMP publisher 与
+   consumer 门禁；必须检查实际渲染帧和 ffprobe，不只看连接状态。
+2. 用户提供测试直播账号或临时 stream key 后，验证至少两个 endpoint。建议一条国内
+   通用 RTMP/RTMPS、一条海外 RTMPS；凭证只通过环境变量或挂载文件传入，日志不得输出。
+3. 如果上述互操作带来代码变更，先重新跑 420 秒 ACK 与故障回归；输入/输出重连必须
+   仍严格等于计划次数。
+4. 用户允许继续长稳测试后，重新跑满 1080p30 两小时门禁并保存 summary/samples 到
+   GitHub Release。不要把本次 2,911 秒的中止运行拼接或折算为通过：
 
 ```powershell
 pwsh ./tools/rtmp.ps1 `
@@ -86,11 +99,31 @@ pwsh ./tools/rtmp.ps1 `
   -SampleIntervalSeconds 30
 ```
 
-2. 复用 `tools/obs.py` 的隔离 HOME 和 obs-websocket 方式，增加 OBS RTMP publisher 与
-   consumer 门禁；必须检查实际渲染帧和 ffprobe，不只看连接状态。
-3. 用户提供测试直播账号或临时 stream key 后，验证至少两个 endpoint。建议一条国内
-   通用 RTMP/RTMPS、一条海外 RTMPS；凭证只通过环境变量或挂载文件传入，日志不得输出。
-4. 全部通过后才勾选 V3-03F、更新支持矩阵并考虑 v0.3 Release。
+5. 全部通过后才勾选 V3-03F、更新支持矩阵并考虑 v0.3 Release。
+
+本轮新增的 ACK 修复已经完成，无需下次重新定位：
+
+- 原因一：已建立 publisher 会话的协议终止被映射为 `Processing`，输出故障会结束管线；
+  现在建立后的协议/TCP 故障映射为可重连的 `Io`。
+- 原因二：固定的 `shiguredo_rtmp` 在约 2.5 MB ACK 边界可能先于 ACK 网络往返进入
+  `Disconnecting`。pcap 已看到 MediaMTX 返回 `2,500,256`，但发送侧在同一边界先
+  自断。fork [`anvsk/rtmp-rs@00e97a6`](https://github.com/anvsk/rtmp-rs/commit/00e97a651d0a08a5b7e4837cc2ad8b4701bc2e9a)
+  对齐窗口并增加默认保持上游行为的配置项；aimedia publisher 关闭依赖内部主动断线，
+  仍保留 ACK 收发，并由自身有界缓冲、TCP 超时和重连状态机处理故障。
+- 原因三：网络损伤时 ffprobe 的 stderr 警告被 PowerShell 包装器并入 JSON；脚本现在用
+  `-v quiet`，控制状态查询增加有限重试和容器状态诊断。
+
+420 秒汇总：
+
+`C:\Users\anvsk\AppData\Local\Temp\aimedia-rtmp-4a25bf85\summary.json`
+
+SHA-256：`E3E4348857BF4DF4DD4B4040E06E8D73AD6B23CA3B229991BC1D0021EF7C6A5A`
+
+主动停止的 2,911 秒部分样本：
+
+`C:\Users\anvsk\AppData\Local\Temp\aimedia-rtmp-12e42279\samples.jsonl`
+
+SHA-256：`E61989631B192B7B3EED8FC6C4B6BF0A1968736A4B234C6B5644C269BB2333E9`
 
 ### 2. RTSP V3-02F
 
@@ -137,8 +170,11 @@ git switch -c codex/feat/<next-slice>
 ```powershell
 cargo fmt --all -- --check
 cargo test -p aimedia-rtmp
-docker build -f docker/Dockerfile.gpu --target sdk-runtime -t aimedia:rtmp-interop .
-pwsh ./tools/rtmp.ps1 -EngineImage aimedia:rtmp-interop -DurationSeconds 180
+docker build -f docker/Dockerfile.gpu --target sdk-runtime -t aimedia:rtmp-next .
+pwsh ./tools/rtmp.ps1 -EngineImage aimedia:rtmp-next -DurationSeconds 420 `
+  -InputFaultAtSeconds 60 -InputFaultSeconds 8 `
+  -OutputFaultAtSeconds 300 -OutputFaultSeconds 8 `
+  -ImpairAtSeconds 350 -ImpairSeconds 20
 ```
 
 提交前还要在 Linux builder 跑 workspace tests、严格 Clippy、release build，并等待 GitHub
@@ -146,5 +182,6 @@ pwsh ./tools/rtmp.ps1 -EngineImage aimedia:rtmp-interop -DurationSeconds 180
 
 ## 暂停原则
 
-本交付合并后停止开发，不创建 v0.4 分支，不发布“RTMP 已 supported”的社区广告。
-下次恢复时优先补外部证据，而不是继续增加新协议或格式。
+本交付合并后按用户要求停止开发，不创建 v0.4 分支，不继续后台测试，也不发布“RTMP
+已 supported”的社区广告。下次恢复时依次完成 V3-03F2 OBS、V3-03F3 真实平台和
+V3-03F4 完整两小时长稳；优先补外部证据，不继续增加新协议或格式。
