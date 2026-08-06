@@ -4,6 +4,10 @@ Copyright 2026 aimedia contributors
 This product is licensed under the Apache License, Version 2.0.
 
 This product includes the retina RTSP library, available under MIT OR Apache-2.0.
+This product includes a pinned Apache-2.0 fork of the shiguredo_rtmp library. The fork keeps
+SetPeerBandwidth and WindowAcknowledgementSize aligned and makes missing-ACK disconnect policy
+configurable for long-lived publisher interoperability; source and patch history are available at
+https://github.com/anvsk/rtmp-rs.
 
 Optional builds may use separately licensed components including libsrt, ONNX Runtime,
 Silero VAD, libxaac, Qwen model weights, and NVIDIA runtime libraries. Their notices and

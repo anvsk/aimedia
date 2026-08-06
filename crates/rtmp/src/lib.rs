@@ -22,8 +22,8 @@ use bytes::Bytes;
 use ingress::IngressGuard;
 use shiguredo_rtmp::{
     AudioFormat, AudioFrame, AudioSampleRate, AvcPacketType, RtmpConnectionEvent,
-    RtmpConnectionState, RtmpPublishClientConnection, RtmpServerConnection, RtmpTimestamp,
-    RtmpTimestampDelta, RtmpUrl, VideoCodec, VideoFrame, VideoFrameType,
+    RtmpConnectionOptions, RtmpConnectionState, RtmpPublishClientConnection, RtmpServerConnection,
+    RtmpTimestamp, RtmpTimestampDelta, RtmpUrl, VideoCodec, VideoFrame, VideoFrameType,
 };
 use thiserror::Error;
 use url::Url;
@@ -448,7 +448,15 @@ impl PublishSession {
             .to_string();
         let url = RtmpUrl::parse_with_stream_name(&normalized_uri, &stream_name)
             .map_err(|_| invalid_endpoint("RTMP publisher endpoint is invalid"))?;
-        let connection = RtmpPublishClientConnection::new(url);
+        let connection = RtmpPublishClientConnection::new_with_options(
+            url,
+            RtmpConnectionOptions {
+                // The sink already owns bounded buffering, TCP write deadlines, and reconnects.
+                // RTMP ACK messages remain enabled, but they must not race a healthy TCP session.
+                disconnect_on_missing_ack: false,
+                ..RtmpConnectionOptions::default()
+            },
+        );
         if connection.send_buf().len() > MAX_CONTROL_SEND_BYTES {
             return Err(RtmpError::new(
                 RtmpErrorCode::ResourceLimit,
@@ -497,7 +505,8 @@ impl PublishSession {
                         events.push(SessionEvent::StateChanged(state));
                     }
                 }
-                RtmpConnectionEvent::DisconnectedByPeer { .. } => {
+                RtmpConnectionEvent::DisconnectedByPeer { reason } => {
+                    tracing::warn!(%reason, "RTMP publisher peer disconnected at the protocol boundary");
                     events.push(SessionEvent::PeerDisconnected);
                 }
                 RtmpConnectionEvent::CommandIgnored { .. }
@@ -541,6 +550,17 @@ impl PublishSession {
         let bytes = Bytes::copy_from_slice(&self.connection.send_buf()[..count]);
         self.connection.advance_send_buf(count);
         self.bytes_sent = self.bytes_sent.saturating_add(count as u64);
+        if self.connection.state() == RtmpConnectionState::Disconnecting {
+            while let Some(event) = self.connection.next_event() {
+                if let RtmpConnectionEvent::DisconnectedByPeer { reason } = event {
+                    tracing::warn!(
+                        %reason,
+                        bytes_sent = self.bytes_sent,
+                        "RTMP publisher disconnected while advancing the send buffer"
+                    );
+                }
+            }
+        }
         bytes
     }
 

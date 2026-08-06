@@ -220,7 +220,7 @@ impl RtmpPacketSink {
                     connection
                         .session
                         .send_video(frame)
-                        .map_err(backend_protocol)?;
+                        .map_err(established_protocol_io)?;
                 }
                 flush_outbound(
                     connection,
@@ -241,7 +241,7 @@ impl RtmpPacketSink {
                     connection
                         .session
                         .send_audio(frame)
-                        .map_err(backend_protocol)?;
+                        .map_err(established_protocol_io)?;
                 }
                 flush_outbound(
                     connection,
@@ -470,7 +470,7 @@ async fn service_peer(
         let events = connection
             .session
             .feed(&incoming[..received])
-            .map_err(backend_protocol)?;
+            .map_err(established_protocol_io)?;
         if events
             .iter()
             .any(|event| matches!(event, SessionEvent::PeerDisconnected))
@@ -541,6 +541,21 @@ fn backend_protocol(error: RtmpError) -> BackendError {
     } else {
         BackendError::Processing(format!("{:?}: {}", error.code, error.message()))
     }
+}
+
+fn established_protocol_io(error: RtmpError) -> BackendError {
+    // Once publishing is established, peer input and media sends belong to one socket. A server
+    // shutdown can move the protocol engine into a terminal state before TCP reports EOF, including
+    // in the small race between servicing peer control traffic and sending the next live frame.
+    // Reconnect that output. Configuration and handshake failures are still classified by
+    // `connect_once` before a Connection is returned.
+    tracing::warn!(
+        code = ?error.code,
+        stage = ?error.stage,
+        message = error.message(),
+        "established RTMP publisher protocol failed; reconnecting output"
+    );
+    backend_io(error)
 }
 
 fn backend_io(error: RtmpError) -> BackendError {

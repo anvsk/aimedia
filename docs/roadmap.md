@@ -207,10 +207,14 @@ v0.3 工程。只有 V2-11 也完成后，总览才把 v0.2 标记为完全完�
       MediaMTX -> FFmpeg/ffprobe 的 180 秒短门禁；输入和输出各中断 8 秒并恢复，注入
       40ms RTT、20ms 抖动、1% 丢包。p95 142ms，恢复片段首视频包为 keyframe，节目
       PTS 连续，队列/surface 有界，运行镜像无 FFmpeg/libav。证据：`tools/rtmp.ps1`
-      和 [RTMP 互操作报告](reports/rtmp.md)。
+      和 [RTMP 互操作报告](reports/rtmp.md)。后续 420 秒回归跨过多个 ACK 窗口，输入/
+      输出重连严格为计划内 1/1，p95 141ms；两小时测试按用户要求在 2,911 秒停止，
+      不计入 F4。
     - [ ] V3-03F2：OBS 作为 RTMP publisher 与 consumer，包含实际渲染和 ffprobe。
     - [ ] V3-03F3：至少两个真实平台 endpoint，覆盖 RTMPS 证书和鉴权路径。
-    - [ ] V3-03F4：1080p30 两小时 GPU soak、资源趋势和原始证据附件。
+    - [ ] V3-03F4：1080p30 两小时 GPU soak、资源趋势和原始证据附件。2026-08-06 的
+      一次运行在 2,911 秒按用户要求主动停止；容器已清理，部分样本已记录，但该门槛
+      仍未完成。
 - [ ] **V3-04 HEVC Bridge**：H.265 输入转 H.264 输出。
 - [ ] **V3-05 格式归一化**：720p/1080p、25/30/50/60fps、横竖屏、44.1/48kHz
   和单/双声道。

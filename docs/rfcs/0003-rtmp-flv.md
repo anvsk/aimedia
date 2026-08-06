@@ -117,13 +117,23 @@ outputs:
 
 ## Rust 依赖决定
 
-协议核心已精确固定为
-[`shiguredo_rtmp 2026.1.0-canary.6`](https://crates.io/crates/shiguredo_rtmp/2026.1.0-canary.6)：
+协议核心以 `2026.1.0-canary.6` 为基线，并精确固定到
+[`anvsk/rtmp-rs@00e97a6`](https://github.com/anvsk/rtmp-rs/commit/00e97a651d0a08a5b7e4837cc2ad8b4701bc2e9a)：
 
 - Apache-2.0、Rust 1.88、零第三方依赖、`no_std`、Sans-I/O。
 - 同时提供 publish client、play client 和 server connection 状态机。
 - socket、超时、rustls、任务和背压由 aimedia 持有，不把 Tokio runtime 藏进协议库。
 - 在 aimedia 的 Rust 1.88 工具链上，上游 89 项 library tests 全部通过。
+
+V3-03F4 长稳预检发现原版在收到与本地默认值不同的 `SetPeerBandwidth` 后，回复窗口与
+内部 ACK 等待窗口不一致；即使对齐数值，发送侧仍可能在 ACK 完成网络往返前先进入
+`Disconnecting`。实际 pcap 证明 MediaMTX 已在 `2,500,256` 字节返回 ACK，但原版在同一
+边界先判定超时，表现为正常 TCP 连接每两分钟左右被主动重建。
+
+固定 fork 做了两项最小修复：回复与对端请求使用相同窗口；增加默认保持原行为的
+`disconnect_on_missing_ack` 选项。aimedia publisher 显式关闭 ACK 强制断线，但仍正常
+收发 ACK；故障和背压由 aimedia 已有的有界发送缓冲、TCP 写超时和重连状态机判定。
+补丁保留完整提交、问题记录和 Apache-2.0 来源；后续优先推动上游合并，再回到官方版本。
 
 它仍是 canary，不能直接泄漏到公共 API。V3-03B 已在短目录 `crates/rtmp` 中完成明文
 发布回环、最大 message、恶意 chunk stream、控制发送缓冲、断线隔离和流名脱敏门禁，
