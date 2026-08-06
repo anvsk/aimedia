@@ -201,7 +201,7 @@ v0.3 工程。只有 V2-11 也完成后，总览才把 v0.2 标记为完全完�
     指数退避连接成功后仍拒绝音频和非 IDR，直到新的 SPS/PPS + IDR 到达。`state` 可查询
     TLS/TCP、连接状态、已发包和重连次数。证据：真实 TCP publisher/listener loopback、
     首帧配置顺序、断线重连和新 IDR 门禁测试，以及 Linux workspace 全量测试；外部软件
-    与真实平台证据留在 V3-03F。
+    与真实平台证据留在 V3-03F。交付：[PR #36](https://github.com/anvsk/aimedia/pull/36)。
   - [ ] V3-03F：OBS、FFmpeg、MediaMTX、至少两个真实平台 endpoint 的互操作、网络
     故障和两小时 soak；全部通过后才升级为 `supported`。
 - [ ] **V3-04 HEVC Bridge**：H.265 输入转 H.264 输出。
