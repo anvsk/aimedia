@@ -42,7 +42,8 @@ MPEG-TS 再拆一次。G.711 摄像机音频会从 8kHz 单声道桥接为输出
 RTMP 输入/输出同样直接接公共压缩包边界：listener 把 FLV tag 转为 H.264 Annex-B 和
 AAC ADTS，publisher 做反向转换，因此不会为了跨协议发布多做一次 TS 封装/拆包。
 RTMPS 校验公开 WebPKI 信任链和主机名；输出断开时不保存历史直播包，重连后等新的
-SPS/PPS + IDR 再恢复。外部软件、真实平台和两小时门禁完成前保持 `experimental`。
+SPS/PPS + IDR 再恢复。FFmpeg 和 MediaMTX 短门禁已通过；OBS、真实平台、RTMPS 实站
+和两小时门禁完成前保持 `experimental`。
 
 ## 2. 在 CPU 环境查看执行计划
 

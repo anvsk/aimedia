@@ -173,3 +173,18 @@ pwsh ./tools/rtsp.ps1 `
 抖动和 1% 丢包。报告检查 RTSP 断开状态、404 退避、恢复计数、输出时间戳、TS 连续性、
 内部延迟、RSS、GPU surface 与所有队列水位。它是可复现的软件互操作证据，不替代
 物理摄像机兼容认证。
+
+RTMP 输入、GPU 转码和 RTMP 输出使用独立门禁。它固定 MediaMTX image digest，要求
+真实 FFmpeg publisher 和 consumer，并分别重启输入 publisher 与输出 MediaMTX；随后
+向引擎网络命名空间注入 40ms RTT、20ms 抖动和 1% 丢包：
+
+```powershell
+pwsh ./tools/rtmp.ps1 `
+  -EngineImage aimedia:gpu `
+  -PeerImage aimedia:test-tools `
+  -DurationSeconds 180
+```
+
+报告验证 H.264/AAC profile、两段媒体的逐包时间戳、输出恢复后的首个 keyframe、节目
+时钟连续性、输入/输出重连计数、p95 延迟、RSS、GPU surface、队列水位和运行镜像依赖。
+短门禁不代替 OBS、真实 RTMPS 平台或两小时 soak。
