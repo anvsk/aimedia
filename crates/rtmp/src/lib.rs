@@ -304,7 +304,8 @@ impl ListenerSession {
                     events.push(SessionEvent::StateChanged(state));
                 }
             }
-            RtmpConnectionEvent::DisconnectedByPeer { .. } => {
+            RtmpConnectionEvent::DisconnectedByPeer { reason } => {
+                tracing::warn!(%reason, "RTMP peer disconnected at the protocol boundary");
                 events.push(SessionEvent::PeerDisconnected);
             }
             RtmpConnectionEvent::CommandIgnored { .. }

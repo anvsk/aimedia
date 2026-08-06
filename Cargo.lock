@@ -110,6 +110,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-rustls",
+ "tracing",
  "url",
  "webpki-roots",
 ]

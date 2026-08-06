@@ -51,9 +51,10 @@
   只能通过显式转换命令迁移，不会在运行时静默兼容。
 - RTSP TCP 已通过 MediaMTX 外部软件短门禁；物理摄像机认证、两小时长稳、UDP 和
   H.265 bridge 仍未完成，因此保持 `experimental`。
-- RTMP listener 与 publisher 已通过真实 TCP 内部回环、断线重连和 IDR 恢复门禁；
-  RTMPS 使用公开 WebPKI 信任根校验证书，不提供跳过校验开关。OBS/FFmpeg/MediaMTX、真实平台
-  endpoint、网络故障和两小时门禁仍在 V3-03F，因此整体仍是 `experimental`。
+- RTMP listener 与 publisher 已通过 FFmpeg -> aimedia GPU -> MediaMTX 的 180 秒外部
+  门禁，覆盖输入/输出重连、网络损伤、IDR 恢复和节目 PTS 连续；RTMPS 使用公开
+  WebPKI 信任根，不提供跳过校验开关。OBS、真实平台 endpoint、RTMPS 实站和两小时
+  门禁仍在 V3-03F，因此整体仍是 `experimental`。
 
 单路 SRT 原生 GPU 数据面已通过 FFmpeg/OBS/VLC 互操作、网络损伤、断流恢复和
 [1080p30 两小时门禁](docs/reports/v0.2-native-live-pipe.md)，在固定支持范围内标记为

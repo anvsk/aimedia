@@ -195,7 +195,13 @@ impl RtmpPacketSource {
         })?;
 
         let result = async {
-            flush_outbound(&mut peer, self.handshake_timeout, self.read_timeout).await?;
+            // FFmpeg sends SetChunkSize before connect. The protocol engine can enqueue an ACK
+            // for that message while its outbound ACK window is still zero, then interprets
+            // advancing the ACK bytes as an overrun. Hold command output until connect has
+            // established the window; handshake output is flushed while still Handshaking.
+            if peer.session.state() != SessionState::Connecting {
+                flush_outbound(&mut peer, self.handshake_timeout, self.read_timeout).await?;
+            }
             let wait = peer_io_timeout(&peer, self.handshake_timeout, self.read_timeout)?;
             let mut buffer = [0_u8; READ_BUFFER_BYTES];
             let received = timeout(wait, peer.stream.read(&mut buffer))
@@ -282,7 +288,9 @@ impl RtmpPacketSource {
                     SessionEvent::StateChanged(_) | SessionEvent::Ignored => {}
                 }
             }
-            flush_outbound(&mut peer, self.handshake_timeout, self.read_timeout).await?;
+            if peer.session.state() != SessionState::Connecting {
+                flush_outbound(&mut peer, self.handshake_timeout, self.read_timeout).await?;
+            }
             if let Some(kind) = rejected {
                 return Err(RtmpError::new(
                     RtmpErrorCode::Protocol,
@@ -359,6 +367,12 @@ impl PacketSource for RtmpPacketSource {
             }
             if let Err(error) = self.pump_peer().await {
                 if self.reconnect_enabled && error.retryable {
+                    tracing::warn!(
+                        code = ?error.code,
+                        stage = ?error.stage,
+                        message = error.message(),
+                        "RTMP publisher session failed; waiting for a replacement"
+                    );
                     continue;
                 }
                 return Err(backend_error(error));
