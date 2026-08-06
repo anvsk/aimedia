@@ -180,8 +180,11 @@ v0.3 工程。只有 V2-11 也完成后，总览才把 v0.2 标记为完全完�
     `rtmpDataPlanePending` 稳定错误和示例。输入固定 RTMP listener，输出固定
     RTMP/RTMPS publisher；URI 与 stream name 分离，所有队列仍有硬上限。证据：
     [PR #32](https://github.com/anvsk/aimedia/pull/32)。
-  - [ ] V3-03B：短目录 `crates/rtmp` 的 Sans-I/O 会话适配器、消息上限、明文回环和
-    恶意分块恢复；候选依赖通过门禁后才精确固定。
+  - [x] V3-03B：短目录 `crates/rtmp` 的 Sans-I/O listener/publisher 会话适配器；
+    `shiguredo_rtmp 2026.1.0-canary.6` 已精确固定并封装在 aimedia 自有类型后。入口在
+    协议分配前限制 64 KiB 单次 feed、64 个 chunk stream、8 MiB 默认 message，控制
+    发送缓冲限制 1 MiB；已通过任意分块、超大声明、chunk stream spray、流名脱敏、
+    断线隔离和明文发布回环。
   - [ ] V3-03C：H.264 Annex-B/AVCC、SPS/PPS、AAC ADTS/raw 和 sequence header
     双向转换。
   - [ ] V3-03D：RTMP listener 输入接入单路原生运行时，断开后等待新 publisher、

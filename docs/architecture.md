@@ -80,7 +80,7 @@ GPU，而是提前回答以下问题：
 ## 当前代码与目标边界
 
 当前已经具备 `MediaJob` 配置与显式旧配置转换、流式 MPEG-TS、SRT adapter、libxaac
-adapter、节目时钟、有界单路调度、本机控制协议、首版图编译器和实验性
+adapter、有界 Sans-I/O RTMP 会话边界、节目时钟、有界单路调度、本机控制协议、首版图编译器和实验性
 NVDEC/NVENC 帧级后端。两个视频 worker 共享
 同一设备的 CUDA primary context，NVDEC 映射的 NV12 帧可在 GPU 内复制到持久注册的
 NVENC surface。单路生产装配已经贯通，执行计划中的生产视频 codec 节点状态为
