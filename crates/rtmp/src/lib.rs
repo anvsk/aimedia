@@ -7,9 +7,11 @@
 mod aac;
 mod avc;
 mod ingress;
+mod source;
 
 pub use aac::{AacAccessUnit, AacError, AacIngest, AacPublisher};
 pub use avc::{AvcAccessUnit, AvcError, AvcIngest, AvcPublisher};
+pub use source::RtmpPacketSource;
 
 use std::fmt;
 
@@ -17,8 +19,9 @@ use aimedia_core::config::{RtmpConfig, RtmpMode};
 use bytes::Bytes;
 use ingress::IngressGuard;
 use shiguredo_rtmp::{
-    AudioFormat, AvcPacketType, RtmpConnectionEvent, RtmpConnectionState,
-    RtmpPublishClientConnection, RtmpServerConnection, RtmpUrl, VideoCodec, VideoFrameType,
+    AudioFormat, AudioFrame, AudioSampleRate, AvcPacketType, RtmpConnectionEvent,
+    RtmpConnectionState, RtmpPublishClientConnection, RtmpServerConnection, RtmpTimestamp,
+    RtmpTimestampDelta, RtmpUrl, VideoCodec, VideoFrame, VideoFrameType,
 };
 use thiserror::Error;
 use url::Url;
@@ -38,6 +41,8 @@ pub enum RtmpErrorCode {
     MessageTooLarge,
     ResourceLimit,
     Protocol,
+    Io,
+    Timeout,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -80,6 +85,11 @@ impl RtmpError {
             false,
             format!("RTMP protocol rejected input ({:?})", error.kind),
         )
+    }
+
+    #[must_use]
+    pub fn message(&self) -> &str {
+        &self.message
     }
 }
 
@@ -391,6 +401,7 @@ pub struct PublishSession {
     bytes_received: u64,
     bytes_sent: u64,
     closed: bool,
+    max_send_bytes: usize,
 }
 
 impl PublishSession {
@@ -450,6 +461,7 @@ impl PublishSession {
             bytes_received: 0,
             bytes_sent: 0,
             closed: false,
+            max_send_bytes: max_message_bytes.saturating_add(64 * 1024),
         })
     }
 
@@ -500,14 +512,7 @@ impl PublishSession {
                 }
             }
         }
-        if self.connection.send_buf().len() > MAX_CONTROL_SEND_BYTES {
-            return Err(RtmpError::new(
-                RtmpErrorCode::ResourceLimit,
-                RtmpErrorStage::Send,
-                false,
-                "RTMP control send buffer exceeds 1 MiB",
-            ));
-        }
+        self.ensure_send_bound()?;
         Ok(events)
     }
 
@@ -549,6 +554,103 @@ impl PublishSession {
             return SessionState::Disconnecting;
         }
         map_publish_state(self.connection.state()).unwrap_or(SessionState::Disconnecting)
+    }
+
+    pub fn send_video(&mut self, frame: RawVideoFrame) -> Result<(), RtmpError> {
+        if self.closed {
+            return Err(closed_session_error());
+        }
+        self.reserve_media_send(frame.payload.len())?;
+        let avc_packet_type = frame.packet_kind.map(|kind| match kind {
+            RawAvcPacketKind::SequenceHeader => AvcPacketType::SequenceHeader,
+            RawAvcPacketKind::NalUnit => AvcPacketType::NalUnit,
+            RawAvcPacketKind::EndOfSequence => AvcPacketType::EndOfSequence,
+        });
+        self.connection
+            .send_video(VideoFrame {
+                timestamp: RtmpTimestamp::from_millis(frame.timestamp_ms),
+                composition_timestamp_offset: RtmpTimestampDelta::from_millis(
+                    frame.composition_offset_ms,
+                ),
+                frame_type: if frame.keyframe {
+                    VideoFrameType::KeyFrame
+                } else {
+                    VideoFrameType::InterFrame
+                },
+                codec: match frame.codec {
+                    RawVideoCodec::Avc => VideoCodec::Avc,
+                    RawVideoCodec::Unsupported => {
+                        return Err(RtmpError::new(
+                            RtmpErrorCode::InvalidState,
+                            RtmpErrorStage::Send,
+                            false,
+                            "publisher only accepts traditional H.264/AVC frames",
+                        ));
+                    }
+                },
+                avc_packet_type,
+                data: frame.payload.to_vec(),
+            })
+            .map_err(|error| RtmpError::protocol(RtmpErrorStage::Send, error))?;
+        self.ensure_send_bound()
+    }
+
+    pub fn send_audio(&mut self, frame: RawAudioFrame) -> Result<(), RtmpError> {
+        if self.closed {
+            return Err(closed_session_error());
+        }
+        if !frame.aac {
+            return Err(RtmpError::new(
+                RtmpErrorCode::InvalidState,
+                RtmpErrorStage::Send,
+                false,
+                "publisher only accepts AAC frames",
+            ));
+        }
+        self.reserve_media_send(frame.payload.len())?;
+        self.connection
+            .send_audio(AudioFrame {
+                timestamp: RtmpTimestamp::from_millis(frame.timestamp_ms),
+                format: AudioFormat::Aac,
+                sample_rate: AudioSampleRate::Khz44,
+                is_8bit_sample: false,
+                is_stereo: true,
+                is_aac_sequence_header: frame.sequence_header,
+                data: frame.payload.to_vec(),
+            })
+            .map_err(|error| RtmpError::protocol(RtmpErrorStage::Send, error))?;
+        self.ensure_send_bound()
+    }
+
+    fn reserve_media_send(&self, payload_bytes: usize) -> Result<(), RtmpError> {
+        if self
+            .connection
+            .send_buf()
+            .len()
+            .saturating_add(payload_bytes)
+            .saturating_add(64)
+            > self.max_send_bytes
+        {
+            return Err(RtmpError::new(
+                RtmpErrorCode::ResourceLimit,
+                RtmpErrorStage::Send,
+                false,
+                "RTMP publisher send buffer would exceed its configured bound",
+            ));
+        }
+        Ok(())
+    }
+
+    fn ensure_send_bound(&self) -> Result<(), RtmpError> {
+        if self.connection.send_buf().len() > self.max_send_bytes {
+            return Err(RtmpError::new(
+                RtmpErrorCode::ResourceLimit,
+                RtmpErrorStage::Send,
+                false,
+                "RTMP publisher send buffer exceeds its configured bound",
+            ));
+        }
+        Ok(())
     }
 
     /// Marks the transport as closed and drops protocol bytes that were not written to the peer.

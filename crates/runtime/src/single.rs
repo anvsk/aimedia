@@ -10,7 +10,7 @@ use std::sync::{
 use std::time::{Duration, Instant};
 
 use aimedia_core::{
-    PipelineConfig, PipelineRuntimeState, RtspRuntimeStats, Timestamp,
+    PipelineConfig, PipelineRuntimeState, RtmpRuntimeStats, RtspRuntimeStats, Timestamp,
     backend::{
         AudioDecoder, AudioEncoder, AudioFrame, BackendError, CodecId, GpuSurfaceObserver,
         MediaPacket, PacketSource, PacketSourceObserver, PacketSourceRuntimeStats, Transport,
@@ -501,7 +501,7 @@ impl SinglePipeline {
             if let Some(observer) = packet_observer.as_ref()
                 && let Ok(stats) = observer.stats().await
             {
-                controller.set_input_rtsp(0, rtsp_stats(stats)).await;
+                set_packet_source_stats(&controller, 0, stats).await;
             }
             let _ = monitor_stop.send(true);
             while monitors.join_next().await.is_some() {}
@@ -512,7 +512,7 @@ impl SinglePipeline {
         if let Some(observer) = packet_observer.as_ref()
             && let Ok(stats) = observer.stats().await
         {
-            controller.set_input_rtsp(0, rtsp_stats(stats)).await;
+            set_packet_source_stats(&controller, 0, stats).await;
         }
         let _ = monitor_stop.send(true);
         while monitors.join_next().await.is_some() {}
@@ -710,7 +710,7 @@ async fn monitor_packet_source(
                 }
             }
             _ = interval.tick() => match observer.stats().await {
-                Ok(stats) => controller.set_input_rtsp(input, rtsp_stats(stats)).await,
+                Ok(stats) => set_packet_source_stats(&controller, input, stats).await,
                 Err(error) => tracing::warn!(input, %error, "could not sample packet-source state"),
             }
         }
@@ -725,6 +725,28 @@ fn rtsp_stats(stats: PacketSourceRuntimeStats) -> RtspRuntimeStats {
         packets_lost: stats.packets_lost,
         reconnects: stats.reconnects,
         last_data_age_ms: stats.last_data_age_ms,
+    }
+}
+
+fn rtmp_stats(stats: PacketSourceRuntimeStats) -> RtmpRuntimeStats {
+    RtmpRuntimeStats {
+        connected: stats.connected,
+        transport: stats.transport,
+        packets_received: stats.packets_received,
+        reconnects: stats.reconnects,
+        last_data_age_ms: stats.last_data_age_ms,
+    }
+}
+
+async fn set_packet_source_stats(
+    controller: &ControllerHandle,
+    input: usize,
+    stats: PacketSourceRuntimeStats,
+) {
+    match stats.protocol.as_str() {
+        "rtsp" => controller.set_input_rtsp(input, rtsp_stats(stats)).await,
+        "rtmp" => controller.set_input_rtmp(input, rtmp_stats(stats)).await,
+        protocol => tracing::warn!(input, protocol, "unknown packet-source protocol"),
     }
 }
 
@@ -1520,6 +1542,64 @@ mod tests {
         assert_eq!(state.inputs[0].codec.video_decoded_frames, 1);
         assert_eq!(state.inputs[0].codec.audio_decoded_frames, 1);
         assert!(state.inputs[0].rtsp.is_some());
+        assert!(state.queues.iter().all(|queue| queue.depth == 0));
+    }
+
+    #[tokio::test]
+    async fn rtmp_packet_source_bypasses_ts_demux_and_reports_protocol_state() {
+        let config = PipelineConfig::from_yaml(include_str!("../../../examples/rtmp-input.yaml"))
+            .expect("RTMP input config");
+        let packets = VecDeque::from([
+            MediaPacket {
+                stream_id: 0,
+                codec: CodecId::H264,
+                pts: Timestamp::new(1_000, 1_000),
+                dts: Some(Timestamp::new(1_000, 1_000)),
+                duration: None,
+                keyframe: true,
+                discontinuity: false,
+                data: Bytes::from_static(&[0, 0, 0, 1, 0x65, 0x88]),
+            },
+            MediaPacket {
+                stream_id: 1,
+                codec: CodecId::AacLc,
+                pts: Timestamp::new(1_000, 1_000),
+                dts: None,
+                duration: Some(Timestamp::new(1_024, 48_000)),
+                keyframe: true,
+                discontinuity: false,
+                data: Bytes::from_static(&[
+                    0xff, 0xf1, 0x4c, 0x80, 0x01, 0x7f, 0xfc, 0x11, 0x22, 0x33, 0x44,
+                ]),
+            },
+        ]);
+        let pipeline = SinglePipeline::new(
+            config,
+            SinglePipelineBackends {
+                input: SingleInput::Packets(Box::new(FakePacketSource { packets })),
+                output: Box::new(FakeTransport {
+                    receive: VecDeque::new(),
+                    sent: Arc::new(StdMutex::new(Vec::new())),
+                }),
+                video_decoder: Box::new(FakeVideoDecoder),
+                video_encoder: Box::new(FakeVideoEncoder),
+                audio_decoder: Box::new(FakeAudioDecoder),
+                audio_encoder: Box::new(FakeAudioEncoder),
+            },
+        )
+        .expect("RTMP packet pipeline builds");
+        assert!(pipeline.plan().edge("input.0", "demux.0").is_none());
+        assert!(pipeline.plan().edge("input.0", "video.decode.0").is_some());
+
+        let state = pipeline.run().await.expect("packet pipeline completes");
+        assert_eq!(state.inputs[0].codec.video_decoded_frames, 1);
+        assert_eq!(state.inputs[0].codec.audio_decoded_frames, 1);
+        let rtmp = state.inputs[0]
+            .rtmp
+            .as_ref()
+            .expect("RTMP state should be present");
+        assert_eq!(rtmp.transport, "tcp");
+        assert!(state.inputs[0].rtsp.is_none());
         assert!(state.queues.iter().all(|queue| queue.depth == 0));
     }
 }

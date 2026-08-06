@@ -132,6 +132,12 @@ outputs:
 公共接口的前提下替换为自有小型状态机或重新评估
 [`rtmp-rs`](https://github.com/torresjeff/rtmp-rs)。
 
+V3-03D 在同一短目录新增 `source.rs`，由 aimedia 自己持有 `TcpListener`、超时和单连接
+生命周期。listener 产生的 FLV 音视频 tag 先被转换为公共 `MediaPacket`，再直接进入
+H.264/AAC codec 队列，因此不会为了 RTMP 复制一套运行时，也不会错误经过 MPEG-TS
+demux。替换 publisher 时重建协议与 AVC/AAC 转换状态，并给两条媒体流各标记一次
+discontinuity；旧连接的待处理媒体不会跨会话保留。RTMP 输出仍由 V3-03E 单独交付。
+
 未选择的主要候选：
 
 | 候选 | 结果 | 原因 |

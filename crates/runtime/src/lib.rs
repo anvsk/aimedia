@@ -12,7 +12,8 @@ use aimedia_core::{
     CameraSnapshot, ControlCommand, ControlErrorCode, ControlRequest, ControlResponse, Director,
     FastSignals, GpuSurfaceRuntimeStats, InputCodecRuntimeStats, InputRuntimeState,
     LatencyRuntimeStats, OutputRuntimeState, PipelineConfig, PipelineMode, PipelineRuntimeState,
-    QueueRuntimeState, RtspRuntimeStats, SrtRuntimeStats, SwitchReason, backend::CodecId,
+    QueueRuntimeState, RtmpRuntimeStats, RtspRuntimeStats, SrtRuntimeStats, SwitchReason,
+    backend::CodecId,
 };
 pub use aimedia_graph::QueueCapacities;
 use aimedia_graph::{
@@ -230,31 +231,35 @@ impl Controller {
     ) -> Result<Self, RuntimePlanError> {
         validate_runtime_plan(config, plan)?;
         let input_count = config.inputs.len();
-        let cameras = std::array::from_fn(|index| CameraSnapshot {
-            name: config.inputs.get(index).map_or_else(
-                || format!("unconfigured-{index}"),
-                |input| input.name.clone(),
-            ),
-            fast: FastSignals {
-                vad: 0.0,
-                mouth_motion: 0.0,
-                composition: 0.5,
-                quality: if index < input_count { 1.0 } else { 0.0 },
-                transport_health: if healthy && index < input_count {
-                    1.0
-                } else {
-                    0.0
+        let cameras = std::array::from_fn(|index| {
+            let initially_ready = healthy
+                && index < input_count
+                && !config.inputs[index]
+                    .uri
+                    .get(..7)
+                    .is_some_and(|scheme| scheme.eq_ignore_ascii_case("rtmp://"));
+            CameraSnapshot {
+                name: config.inputs.get(index).map_or_else(
+                    || format!("unconfigured-{index}"),
+                    |input| input.name.clone(),
+                ),
+                fast: FastSignals {
+                    vad: 0.0,
+                    mouth_motion: 0.0,
+                    composition: 0.5,
+                    quality: if index < input_count { 1.0 } else { 0.0 },
+                    transport_health: if initially_ready { 1.0 } else { 0.0 },
                 },
-            },
-            healthy: healthy && index < input_count,
-            synchronized: healthy && index < input_count,
-            frozen: false,
-            skew_ms: 0,
+                healthy: initially_ready,
+                synchronized: initially_ready,
+                frozen: false,
+                skew_ms: 0,
+            }
         });
         let input_states = std::array::from_fn(|index| InputRuntimeState {
             name: cameras[index].name.clone(),
-            healthy: healthy && index < input_count,
-            synchronized: healthy && index < input_count,
+            healthy: cameras[index].healthy,
+            synchronized: cameras[index].synchronized,
             frozen: false,
             skew_ms: 0,
             video_timeline_depth: 0,
@@ -280,6 +285,16 @@ impl Controller {
                     |rtsp| format!("{:?}", rtsp.transport).to_ascii_lowercase(),
                 ),
                 ..RtspRuntimeStats::default()
+            }),
+            rtmp: (index < input_count
+                && config.inputs[index]
+                    .uri
+                    .get(..7)
+                    .is_some_and(|scheme| scheme.eq_ignore_ascii_case("rtmp://")))
+            .then(|| RtmpRuntimeStats {
+                connected: false,
+                transport: "tcp".to_owned(),
+                ..RtmpRuntimeStats::default()
             }),
             codec: InputCodecRuntimeStats::default(),
             gpu: GpuSurfaceRuntimeStats::default(),
@@ -482,6 +497,20 @@ impl Controller {
             self.cameras[index].fast.transport_health = 0.0;
         }
         self.input_states[index].rtsp = Some(stats);
+    }
+
+    fn set_input_rtmp(&mut self, index: usize, stats: RtmpRuntimeStats) {
+        if index >= self.input_count {
+            return;
+        }
+        if !stats.connected {
+            self.input_states[index].healthy = false;
+            self.input_states[index].synchronized = false;
+            self.cameras[index].healthy = false;
+            self.cameras[index].synchronized = false;
+            self.cameras[index].fast.transport_health = 0.0;
+        }
+        self.input_states[index].rtmp = Some(stats);
     }
 
     fn set_output_srt(&mut self, stats: SrtRuntimeStats) {
@@ -720,11 +749,10 @@ fn controller_queue_states(
     for index in 0..config.inputs.len() {
         let source = format!("input.{index}");
         let demux = format!("demux.{index}");
-        let rtsp = config.inputs[index]
-            .uri
-            .get(..7)
-            .is_some_and(|scheme| scheme.eq_ignore_ascii_case("rtsp://"));
-        let packet_source = if rtsp {
+        let packet_source_protocol = config.inputs[index].uri.get(..7).is_some_and(|scheme| {
+            scheme.eq_ignore_ascii_case("rtsp://") || scheme.eq_ignore_ascii_case("rtmp://")
+        });
+        let packet_source = if packet_source_protocol {
             source.clone()
         } else {
             plan_queue_capacity(plan, &source, &demux, FullPolicy::Backpressure)?;
@@ -887,6 +915,10 @@ impl ControllerHandle {
 
     pub(crate) async fn set_input_rtsp(&self, index: usize, stats: RtspRuntimeStats) {
         self.inner.lock().await.set_input_rtsp(index, stats);
+    }
+
+    pub(crate) async fn set_input_rtmp(&self, index: usize, stats: RtmpRuntimeStats) {
+        self.inner.lock().await.set_input_rtmp(index, stats);
     }
 
     pub(crate) async fn set_output_srt(&self, stats: SrtRuntimeStats) {
