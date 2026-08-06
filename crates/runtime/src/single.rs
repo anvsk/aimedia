@@ -977,12 +977,16 @@ async fn encode_video(
     let mut ticker = tokio::time::interval_at(tokio::time::Instant::now(), frame_period);
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Burst);
     let mut poll_next_frame = false;
+    let mut fresh_input = true;
     loop {
         ticker.tick().await;
         if poll_next_frame {
             match receiver.try_recv() {
-                Ok(frame) => last_frame = Some(frame.into_timed()),
-                Err(mpsc::error::TryRecvError::Empty) => {}
+                Ok(frame) => {
+                    last_frame = Some(frame.into_timed());
+                    fresh_input = true;
+                }
+                Err(mpsc::error::TryRecvError::Empty) => fresh_input = false,
                 Err(mpsc::error::TryRecvError::Disconnected) => break,
             }
         } else {
@@ -992,7 +996,14 @@ async fn encode_video(
         let Some(frame) = last_frame.as_ref() else {
             continue;
         };
-        let entered_at = frame.entered_at;
+        // A repeated fallback frame is a new program-tick output, not an input packet still
+        // waiting inside the engine. Starting its latency at this tick keeps the processing SLO
+        // separate from the independently reported input freeze age.
+        let entered_at = if fresh_input {
+            frame.entered_at
+        } else {
+            Instant::now()
+        };
         let mut frame = frame.value.clone();
         let pts = clock.lock().await.next_video_pts_90khz();
         frame.pts = timestamp_90khz(pts);

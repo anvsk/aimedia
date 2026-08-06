@@ -27,8 +27,8 @@ use bytes::Bytes;
 use futures_util::StreamExt;
 use retina::{
     client::{
-        Credentials, Demuxed, PlayOptions, Session, SessionGroup, SessionOptions, SetupOptions,
-        TcpTransportOptions, Transport, UdpTransportOptions,
+        Credentials, Demuxed, InitialTimestampPolicy, PlayOptions, Session, SessionGroup,
+        SessionOptions, SetupOptions, TcpTransportOptions, Transport, UdpTransportOptions,
     },
     codec::{CodecItem, FrameFormat, ParametersRef},
 };
@@ -340,7 +340,12 @@ impl RtspError {
             RtspErrorStage::Teardown => RtspErrorCode::TeardownFailed,
             RtspErrorStage::Configuration => RtspErrorCode::InvalidEndpoint,
         };
-        let retryable = !matches!(error.status_code(), Some(400..=499));
+        // MediaMTX and similar relays return 404 while a configured publishing path is
+        // temporarily offline. Treat that status as transient so an established live input can
+        // recover when its publisher returns. Initial connection still fails fast because only
+        // RtspPacketSource::reconnect loops on this flag.
+        let retryable =
+            !matches!(error.status_code(), Some(400..=499)) || error.status_code() == Some(404);
         Self::new(code, stage, retryable, error.to_string())
     }
 
@@ -564,9 +569,14 @@ impl RtspSession {
         let playing = timeout(
             endpoint.connect_timeout,
             session.play(
-                PlayOptions::default().enforce_timestamps_with_max_jump_secs(
-                    NonZeroU32::new(MAX_TIMESTAMP_JUMP_SECONDS).expect("constant is non-zero"),
-                ),
+                PlayOptions::default()
+                    // Some mainstream live RTSP servers omit rtptime for one or all tracks.
+                    // The program clock is independent, so falling back to each track's first
+                    // packet is safer than rejecting the complete multi-track session.
+                    .initial_timestamp(InitialTimestampPolicy::Permissive)
+                    .enforce_timestamps_with_max_jump_secs(
+                        NonZeroU32::new(MAX_TIMESTAMP_JUMP_SECONDS).expect("constant is non-zero"),
+                    ),
             ),
         )
         .await
@@ -1402,6 +1412,35 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn tcp_packet_source_accepts_multitrack_play_without_rtptime() {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("mock camera should bind");
+        let address = listener.local_addr().expect("mock camera has an address");
+        let server = tokio::spawn(async move {
+            let (socket, _) = listener.accept().await?;
+            serve_mock_camera_profile(socket, address.port(), MockVideo::H264, false, true).await
+        });
+
+        let endpoint = RtspEndpoint::from_config(&format!("rtsp://{address}/live"), &config())
+            .expect("loopback endpoint should be valid");
+        let mut source = RtspPacketSource::connect(endpoint)
+            .await
+            .expect("a mainstream server may omit PLAY rtptime for multiple tracks");
+        let packet = source
+            .receive_packet()
+            .await
+            .expect("permissive timestamp setup should still emit media");
+        assert_eq!(packet.codec, CodecId::H264);
+
+        source.close().await.expect("RTSP session should close");
+        server
+            .await
+            .expect("mock camera task should not panic")
+            .expect("mock camera should complete without I/O errors");
+    }
+
+    #[tokio::test]
     async fn tcp_packet_source_reconnects_without_buffering_old_media() {
         let listener = TcpListener::bind("127.0.0.1:0")
             .await
@@ -1410,8 +1449,10 @@ mod tests {
         let server = tokio::spawn(async move {
             let (first, _) = listener.accept().await?;
             serve_mock_camera_once(first, address.port(), true).await?;
-            let (second, _) = listener.accept().await?;
-            serve_mock_camera_once(second, address.port(), false).await
+            let (unavailable, _) = listener.accept().await?;
+            serve_mock_unavailable(unavailable).await?;
+            let (recovered, _) = listener.accept().await?;
+            serve_mock_camera_once(recovered, address.port(), false).await
         });
 
         let mut reconnect_config = config();
@@ -1485,7 +1526,7 @@ mod tests {
         let address = listener.local_addr().expect("mock camera has an address");
         let server = tokio::spawn(async move {
             let (socket, _) = listener.accept().await?;
-            serve_mock_camera_profile(socket, address.port(), MockVideo::H265, false).await
+            serve_mock_camera_profile(socket, address.port(), MockVideo::H265, false, false).await
         });
 
         let endpoint = RtspEndpoint::from_config(&format!("rtsp://{address}/live"), &config())
@@ -1565,7 +1606,7 @@ mod tests {
     }
 
     async fn serve_mock_camera(socket: TcpStream, port: u16) -> io::Result<()> {
-        serve_mock_camera_profile(socket, port, MockVideo::H264, false).await
+        serve_mock_camera_profile(socket, port, MockVideo::H264, false, false).await
     }
 
     async fn serve_mock_camera_once(
@@ -1573,7 +1614,29 @@ mod tests {
         port: u16,
         disconnect_after_frame: bool,
     ) -> io::Result<()> {
-        serve_mock_camera_profile(socket, port, MockVideo::H264, disconnect_after_frame).await
+        serve_mock_camera_profile(socket, port, MockVideo::H264, disconnect_after_frame, false)
+            .await
+    }
+
+    async fn serve_mock_unavailable(mut socket: TcpStream) -> io::Result<()> {
+        let mut pending = Vec::new();
+        let request = read_request(&mut socket, &mut pending).await?;
+        let request = String::from_utf8_lossy(&request);
+        let cseq = request
+            .lines()
+            .find_map(|line| {
+                line.split_once(':').and_then(|(name, value)| {
+                    name.eq_ignore_ascii_case("cseq")
+                        .then(|| value.trim().to_owned())
+                })
+            })
+            .unwrap_or_else(|| "1".to_owned());
+        socket
+            .write_all(
+                format!("RTSP/1.0 404 Not Found\r\nCSeq: {cseq}\r\nContent-Length: 0\r\n\r\n")
+                    .as_bytes(),
+            )
+            .await
     }
 
     async fn serve_mock_camera_profile(
@@ -1581,6 +1644,7 @@ mod tests {
         port: u16,
         video: MockVideo,
         disconnect_after_frame: bool,
+        omit_rtptime: bool,
     ) -> io::Result<()> {
         let mut pending = Vec::new();
         let mut setup_count = 0_u8;
@@ -1641,12 +1705,19 @@ mod tests {
                     .await?;
                 }
                 "PLAY" => {
+                    let rtp_info = if omit_rtptime {
+                        format!(
+                            "RTP-Info: url=rtsp://127.0.0.1:{port}/live/trackID=1;seq=1,url=rtsp://127.0.0.1:{port}/live/trackID=2;seq=1\r\n"
+                        )
+                    } else {
+                        format!(
+                            "RTP-Info: url=rtsp://127.0.0.1:{port}/live/trackID=1;seq=1;rtptime=0,url=rtsp://127.0.0.1:{port}/live/trackID=2;seq=1;rtptime=0\r\n"
+                        )
+                    };
                     write_response(
                         &mut socket,
                         &cseq,
-                        &format!(
-                            "Session: aimedia-test\r\nRange: npt=0.000-\r\nRTP-Info: url=rtsp://127.0.0.1:{port}/live/trackID=1;seq=1;rtptime=0,url=rtsp://127.0.0.1:{port}/live/trackID=2;seq=1;rtptime=0\r\n"
-                        ),
+                        &format!("Session: aimedia-test\r\nRange: npt=0.000-\r\n{rtp_info}"),
                         b"",
                     )
                     .await?;
