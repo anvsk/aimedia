@@ -164,6 +164,14 @@ v0.3 工程。只有 V2-11 也完成后，总览才把 v0.2 标记为完全完�
     运行前仍返回稳定 `videoBridgePending`，Linux workspace 45 项测试与严格 Clippy
     通过。
   - [ ] V3-02F：外部设备、网络损伤、两小时 soak 和支持矩阵升级。
+    - [x] V3-02F1：MediaMTX 1.20.0 + FFmpeg 发布端的外部软件互操作、GPU 闭环、
+      发布源断开/404 重试/恢复，以及 40ms RTT、20ms 抖动、1% 丢包短门禁。
+      证据：`tools/rtsp.ps1` 和 [RTSP 互操作报告](reports/rtsp.md)；180 秒运行 p95
+      90ms，PTS/DTS/PCR 零回退，TS 零损坏，队列和 surface 有界。该证据不能冒充
+      物理摄像机认证。
+    - [ ] V3-02F2：至少两台不同厂商摄像机或两个 ONVIF 合规设备，记录型号、固件、
+      H.264/AAC 或 G.711 profile 和鉴权结果。
+    - [ ] V3-02F3：外部 RTSP 1080p30 两小时门禁和支持矩阵最终升级。
 - [ ] **V3-03 RTMP/RTMPS 与 FLV**：输入、输出、FLV demux/mux。
 - [ ] **V3-04 HEVC Bridge**：H.265 输入转 H.264 输出。
 - [ ] **V3-05 格式归一化**：720p/1080p、25/30/50/60fps、横竖屏、44.1/48kHz

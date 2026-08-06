@@ -46,7 +46,8 @@
 
 - 多输出和 Analyzer Tap 数据面。通用 `MediaJob` v2 配置已经取代旧导播配置；旧文件
   只能通过显式转换命令迁移，不会在运行时静默兼容。
-- RTSP UDP、H.265 bridge、外部摄像机兼容和长稳；当前 TCP 路径保持 `experimental`。
+- RTSP TCP 已通过 MediaMTX 外部软件短门禁；物理摄像机认证、两小时长稳、UDP 和
+  H.265 bridge 仍未完成，因此保持 `experimental`。
 
 单路 SRT 原生 GPU 数据面已通过 FFmpeg/OBS/VLC 互操作、网络损伤、断流恢复和
 [1080p30 两小时门禁](docs/reports/v0.2-native-live-pipe.md)，在固定支持范围内标记为
@@ -116,6 +117,7 @@ crates/
 - [设计取舍](docs/design-rationale.md)
 - [市场支持策略](docs/market-support.md)
 - [支持矩阵](docs/support-matrix.md)
+- [RTSP 互操作报告](docs/reports/rtsp.md)
 - [v0.2 Release Notes](docs/releases/v0.2.md)
 
 ## 许可证

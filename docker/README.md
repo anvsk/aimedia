@@ -157,3 +157,19 @@ HTTP Ubuntu 镜像；APT 仍会校验 Ubuntu 签名的 repository metadata 和 p
 
 脚本在系统临时目录中保留 `summary.json`、输出 TS、OBS 日志和渲染截图；容器和
 专用 Docker network 默认自动清理。
+
+RTSP TCP 的外部软件兼容、断源恢复和网络损伤使用单独的短入口；MediaMTX 固定到
+1.20.0 image digest，FFmpeg 只生成测试源，真正的解码、节目时钟、编码和 SRT 输出均
+由 GPU 运行镜像完成：
+
+```powershell
+pwsh ./tools/rtsp.ps1 `
+  -EngineImage aimedia:gpu `
+  -PeerImage aimedia:test-tools `
+  -DurationSeconds 180
+```
+
+默认在 45 秒处关闭发布源 8 秒，在 90 秒处向引擎网络命名空间注入 40ms RTT、20ms
+抖动和 1% 丢包。报告检查 RTSP 断开状态、404 退避、恢复计数、输出时间戳、TS 连续性、
+内部延迟、RSS、GPU surface 与所有队列水位。它是可复现的软件互操作证据，不替代
+物理摄像机兼容认证。
