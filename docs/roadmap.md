@@ -185,8 +185,10 @@ v0.3 工程。只有 V2-11 也完成后，总览才把 v0.2 标记为完全完�
     协议分配前限制 64 KiB 单次 feed、64 个 chunk stream、8 MiB 默认 message，控制
     发送缓冲限制 1 MiB；已通过任意分块、超大声明、chunk stream spray、流名脱敏、
     断线隔离和明文发布回环。证据：[PR #33](https://github.com/anvsk/aimedia/pull/33)。
-  - [ ] V3-03C：H.264 Annex-B/AVCC、SPS/PPS、AAC ADTS/raw 和 sequence header
-    双向转换。
+  - [x] V3-03C：`crates/rtmp/src/avc.rs` 和 `aac.rs` 完成 H.264 Annex-B/AVCC、
+    SPS/PPS、AAC ADTS/raw 和 sequence header 双向转换。输入配置变化后重新等待 IDR，
+    输出在媒体前重发配置；只接受 48 kHz 双声道 AAC-LC，并保留 DTS 与 composition
+    offset 的边界。证据：[PR #34](https://github.com/anvsk/aimedia/pull/34)。
   - [ ] V3-03D：RTMP listener 输入接入单路原生运行时，断开后等待新 publisher、
     sequence header 和 IDR。
   - [ ] V3-03E：RTMP/RTMPS publisher、rustls、输出重连、配置重发和 IDR 闸门。

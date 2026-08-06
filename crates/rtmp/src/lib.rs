@@ -4,7 +4,12 @@
 //! machine behind aimedia-owned types and rejects oversized messages and chunk-stream sprays
 //! before they reach the protocol decoder.
 
+mod aac;
+mod avc;
 mod ingress;
+
+pub use aac::{AacAccessUnit, AacError, AacIngest, AacPublisher};
+pub use avc::{AvcAccessUnit, AvcError, AvcIngest, AvcPublisher};
 
 use std::fmt;
 

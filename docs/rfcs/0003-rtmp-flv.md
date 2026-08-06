@@ -56,11 +56,20 @@ RTMP/FLV 使用 `AVCDecoderConfigurationRecord` 保存 SPS/PPS，并用长度前
 重连后不得续用旧连接的配置状态。输出必须重新发送 metadata、AVC sequence header、
 AAC sequence header，并请求新的 IDR。
 
+V3-03C 已在 `crates/rtmp/src/avc.rs` 实现双向转换：输入只在合法 sequence header 后
+接收 AVCC NAL，配置变化或 end-of-sequence 后重新等待 IDR，并在首个 IDR 前附加
+Annex-B SPS/PPS；输出从 Annex-B 提取 SPS/PPS、生成四字节长度前缀 AVCC，并保证新的
+sequence header 先于对应媒体。composition-time offset 在输出前校验为 signed 24-bit。
+
 ### AAC 转换
 
 FLV 的 AAC sequence header 保存 `AudioSpecificConfig`，普通音频 tag 只保存 AAC raw
 payload；当前 AAC decoder 接收 ADTS。输入端据此为 raw payload 重建 ADTS，输出端从
 ADTS 提取配置和 raw payload。没有合法 sequence header 时不把音频送入 decoder。
+
+V3-03C 的 `crates/rtmp/src/aac.rs` 固定接受 AAC-LC、48 kHz、双声道；每个 raw tag
+重建为一个 7 字节无 CRC ADTS header，每个输出 ADTS packet 也必须恰好包含一帧。首次
+输出或连接重建后先发送 `AudioSpecificConfig`，不在这一层做重采样或声道转换。
 
 ## 时钟和重连
 
