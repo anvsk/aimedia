@@ -90,7 +90,8 @@ NVENC surface。单路生产装配已经贯通，执行计划中的生产视频 
 断流保活和输出恢复已经贯通真实 GPU 数据面。运行状态现在直接取自
 `ExecutionPlan`、libsrt 和 NVDEC surface 租约：每条计划边都报告容量、满载策略、
 当前水位和历史高水位，共享一个物理队列的边保持同一水位。v0.2 的互操作、网络损伤、
-两小时稳定性和 Release 已完成；v0.3 按路线图依次推进 RTSP、RTMP/RTMPS 和格式归一化，
+两小时稳定性和 Release 已完成；v0.3 按路线图依次推进 RTSP、
+[RTMP/RTMPS 与 FLV](rfcs/0003-rtmp-flv.md) 和格式归一化，
 多输出与通用 AI Tap 仍留在 v0.4。
 
 ## 扩展边界

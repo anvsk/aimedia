@@ -15,11 +15,9 @@ pub enum CompileError {
     InvalidConfig(String),
     #[error("the current graph compiler supports one or two inputs, got {0}")]
     InputCount(usize),
-    #[error(
-        "input {input:?} uses unsupported transport {uri:?}; only SRT and RTSP are available now"
-    )]
+    #[error("input {input:?} uses unsupported transport {uri:?}; SRT, RTSP, and RTMP are declared")]
     UnsupportedInputTransport { input: String, uri: String },
-    #[error("output uses unsupported transport {0:?}; only SRT is available now")]
+    #[error("output uses unsupported transport {0:?}; SRT, RTMP, and RTMPS are declared")]
     UnsupportedOutputTransport(String),
 }
 
@@ -66,6 +64,7 @@ pub enum MemoryDomain {
 #[serde(rename_all = "camelCase")]
 pub enum MediaType {
     MpegTs,
+    RtmpMessage,
     H264AccessUnit,
     AacAdts,
     CompressedAudio,
@@ -213,14 +212,14 @@ pub fn compile(config: &PipelineConfig) -> Result<ExecutionPlan, CompileError> {
         return Err(CompileError::InputCount(config.inputs.len()));
     }
     for input in &config.inputs {
-        if !is_srt(&input.uri) && !is_rtsp(&input.uri) {
+        if !is_srt(&input.uri) && !is_rtsp(&input.uri) && !is_rtmp(&input.uri) {
             return Err(CompileError::UnsupportedInputTransport {
                 input: input.name.clone(),
                 uri: input.uri.clone(),
             });
         }
     }
-    if !is_srt(&config.output.uri) {
+    if !is_srt(&config.output.uri) && !is_rtmp(&config.output.uri) {
         return Err(CompileError::UnsupportedOutputTransport(
             config.output.uri.clone(),
         ));
@@ -241,14 +240,21 @@ pub fn compile(config: &PipelineConfig) -> Result<ExecutionPlan, CompileError> {
         let video_decode = format!("video.decode.{index}");
         let audio_decode = format!("audio.decode.{index}");
         let rtsp = is_rtsp(&input.uri);
+        let rtmp = is_rtmp(&input.uri);
         nodes.push(node(
             &source,
             NodeKind::TransportInput,
             MemoryDomain::Host,
             true,
-            NodeStatus::AdapterReady,
+            if rtmp {
+                NodeStatus::Pending
+            } else {
+                NodeStatus::AdapterReady
+            },
             if rtsp {
                 format!("RTSP/RTP input and bounded depacketizer {}", input.name)
+            } else if rtmp {
+                format!("RTMP listener and bounded message reader {}", input.name)
             } else {
                 format!("SRT input {}", input.name)
             },
@@ -259,8 +265,16 @@ pub fn compile(config: &PipelineConfig) -> Result<ExecutionPlan, CompileError> {
                 NodeKind::Demux,
                 MemoryDomain::Host,
                 true,
-                NodeStatus::Implemented,
-                "streaming MPEG-TS demux".to_owned(),
+                if rtmp {
+                    NodeStatus::Pending
+                } else {
+                    NodeStatus::Implemented
+                },
+                if rtmp {
+                    "FLV tag demux plus AVC/AAC normalization".to_owned()
+                } else {
+                    "streaming MPEG-TS demux".to_owned()
+                },
             ));
         }
         nodes.extend([
@@ -280,6 +294,8 @@ pub fn compile(config: &PipelineConfig) -> Result<ExecutionPlan, CompileError> {
                 NodeStatus::AdapterReady,
                 if rtsp {
                     "AAC-LC or G.711 to 48 kHz stereo f32 PCM".to_owned()
+                } else if rtmp {
+                    "FLV AAC-LC payload to interleaved f32 PCM".to_owned()
                 } else {
                     "AAC-LC to interleaved f32 PCM".to_owned()
                 },
@@ -311,7 +327,11 @@ pub fn compile(config: &PipelineConfig) -> Result<ExecutionPlan, CompileError> {
                 edge(
                     &source,
                     &demux,
-                    MediaType::MpegTs,
+                    if rtmp {
+                        MediaType::RtmpMessage
+                    } else {
+                        MediaType::MpegTs
+                    },
                     MemoryDomain::Host,
                     ClockDomain::Source,
                     capacities.transport_messages,
@@ -329,7 +349,11 @@ pub fn compile(config: &PipelineConfig) -> Result<ExecutionPlan, CompileError> {
                 edge(
                     &demux,
                     &audio_decode,
-                    MediaType::AacAdts,
+                    if rtmp {
+                        MediaType::CompressedAudio
+                    } else {
+                        MediaType::AacAdts
+                    },
                     MemoryDomain::Host,
                     ClockDomain::Source,
                     capacities.audio_blocks,
@@ -339,6 +363,7 @@ pub fn compile(config: &PipelineConfig) -> Result<ExecutionPlan, CompileError> {
         }
     }
 
+    let rtmp_output = is_rtmp(&config.output.uri);
     nodes.extend([
         node(
             "video.timeline",
@@ -377,16 +402,32 @@ pub fn compile(config: &PipelineConfig) -> Result<ExecutionPlan, CompileError> {
             NodeKind::Mux,
             MemoryDomain::Host,
             true,
-            NodeStatus::Implemented,
-            "MPEG-TS mux with program PTS, DTS and PCR".to_owned(),
+            if rtmp_output {
+                NodeStatus::Pending
+            } else {
+                NodeStatus::Implemented
+            },
+            if rtmp_output {
+                "FLV AVC/AAC tag mux with program millisecond timestamps".to_owned()
+            } else {
+                "MPEG-TS mux with program PTS, DTS and PCR".to_owned()
+            },
         ),
         node(
             "output.program",
             NodeKind::TransportOutput,
             MemoryDomain::Host,
             true,
-            NodeStatus::AdapterReady,
-            "bounded SRT output".to_owned(),
+            if rtmp_output {
+                NodeStatus::Pending
+            } else {
+                NodeStatus::AdapterReady
+            },
+            if rtmp_output {
+                "bounded RTMP/RTMPS publisher".to_owned()
+            } else {
+                "bounded SRT output".to_owned()
+            },
         ),
     ]);
 
@@ -526,7 +567,11 @@ pub fn compile(config: &PipelineConfig) -> Result<ExecutionPlan, CompileError> {
         edge(
             "mux.program",
             "output.program",
-            MediaType::MpegTs,
+            if rtmp_output {
+                MediaType::RtmpMessage
+            } else {
+                MediaType::MpegTs
+            },
             MemoryDomain::Host,
             ClockDomain::Program,
             capacities.transport_messages,
@@ -567,6 +612,14 @@ fn is_srt(uri: &str) -> bool {
 fn is_rtsp(uri: &str) -> bool {
     uri.get(..7)
         .is_some_and(|scheme| scheme.eq_ignore_ascii_case("rtsp://"))
+}
+
+fn is_rtmp(uri: &str) -> bool {
+    uri.get(..7)
+        .is_some_and(|scheme| scheme.eq_ignore_ascii_case("rtmp://"))
+        || uri
+            .get(..8)
+            .is_some_and(|scheme| scheme.eq_ignore_ascii_case("rtmps://"))
 }
 
 fn node(
@@ -686,6 +739,33 @@ mod tests {
             plan.edge("input.0", "audio.decode.0")
                 .map(|edge| edge.contract.media),
             Some(MediaType::CompressedAudio)
+        );
+    }
+
+    #[test]
+    fn declares_rtmp_flv_boundaries_as_pending_without_hiding_queue_limits() {
+        let config = PipelineConfig::from_yaml(include_str!("../../../examples/rtmp.yaml"))
+            .expect("RTMP contract should parse");
+        let plan = compile(&config).expect("RTMP graph should compile");
+
+        assert_eq!(
+            plan.edge("input.0", "demux.0")
+                .map(|edge| edge.contract.media),
+            Some(MediaType::RtmpMessage)
+        );
+        assert_eq!(
+            plan.edge("mux.program", "output.program")
+                .map(|edge| edge.contract.media),
+            Some(MediaType::RtmpMessage)
+        );
+        assert!(plan.edges.iter().all(|edge| edge.queue.capacity > 0));
+        let pending = plan
+            .pending_nodes()
+            .map(|node| node.id.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            pending,
+            ["input.0", "demux.0", "mux.program", "output.program"]
         );
     }
 }

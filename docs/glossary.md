@@ -15,6 +15,11 @@
 | Clock domain | Clock Domain | 时间戳属于输入设备、最终节目还是控制事件 | 输入时间只用于映射，输出使用独立节目时钟 |
 | Analyzer Tap | Analyzer Tap | 从主流水线旁边取少量样本的观察口 | 给字幕、审核、识别和导播 AI 提供抽样帧、PCM 与指标，失败不影响直播 |
 | SRT | Secure Reliable Transport | 像给直播视频准备的一条会补包、能加密的网络专线 | 承载实时输入或输出；可靠传输直接复用 libsrt |
+| RTMP | Real-Time Messaging Protocol | 编码器和直播平台之间常见的“推流会话”：先握手和报到，再连续发送音视频 | v0.3 接收 OBS/编码器发布，也把节目推到平台；它负责连接和传输，不负责压缩画面 |
+| RTMPS | RTMP over TLS | 给 RTMP 外面再套一层 HTTPS 同类的加密和服务器身份校验 | 海外和直播云发布的默认安全出口；stream key 与证书错误必须分阶段报告 |
+| FLV tag | Flash Video tag | RTMP 连接里的一个个音频、视频或说明“小信封” | 保存 H.264/AAC 配置和压缩帧；只实现传统 AVC/AAC 子集，不等于提供 FLV 文件播放器 |
+| AMF | Action Message Format | RTMP 握手后用来表达 `connect`、`publish` 等命令的数据编码 | 协议适配器解析必要命令；AMF 数据不能越过 RTMP 边界污染媒体内核 |
+| Sans-I/O | Sans Input/Output | 协议状态机只吃字节、吐字节，不私自创建 socket、线程或定时器 | aimedia 自己控制 Tokio、rustls、超时、取消和有界队列，RTMP 库只负责协议规则 |
 | MPEG-TS | MPEG Transport Stream | 把视频、音频和节目说明切成固定 188 字节小包的“直播运输箱” | SRT 内实际传输的容器；aimedia 独立实现解析和重新封装 |
 | PSI | Program Specific Information | 告诉接收端“箱子里有哪些节目和轨道”的目录 | PAT 和 PMT 都属于 PSI，需要周期性发送 |
 | PAT | Program Association Table | 总目录：节目编号对应哪一张 PMT | 输出固定指向 PMT PID `0x1000` |
@@ -27,6 +32,7 @@
 | GOP | Group of Pictures | 从一张完整画面到下一张完整画面之间的一组压缩帧 | 输出使用 1 秒 GOP，限制故障恢复和随机接入等待 |
 | IDR | Instantaneous Decoder Refresh | 一张能让解码器“从这里重新开始”的完整关键帧 | 切镜和输出重连时请求 NVENC 立即生成 |
 | H.264 / AVC | Advanced Video Coding | 常见的视频压缩标准 | Alpha 只支持 8-bit 4:2:0、Main、最高 1080p30 |
+| Annex-B / AVCC | H.264 byte-stream / AVC configuration format | 同一批 H.264 压缩数据的两种“装订方式”：一种用起始码分隔，一种用长度分隔 | NVDEC/NVENC 边界使用 Annex-B，RTMP/FLV 使用 AVCC；适配器负责无损转换和 SPS/PPS 配置 |
 | AAC-LC | Advanced Audio Coding, Low Complexity | 常见的有损音频压缩格式 | 只支持 48kHz、双声道；输出 128kbps |
 | ADTS | Audio Data Transport Stream | 每个 AAC 音频帧前的小标签，写有长度和采样参数 | TS 中 AAC 的 Alpha 封装格式 |
 | PCM | Pulse-Code Modulation | 未压缩的音频采样，可以直接做音量、重采样和 AI 运算 | AAC 解码后的统一音频处理格式；多输入切换不能直接拼接压缩包 |
