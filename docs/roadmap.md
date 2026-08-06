@@ -184,7 +184,7 @@ v0.3 工程。只有 V2-11 也完成后，总览才把 v0.2 标记为完全完�
     `shiguredo_rtmp 2026.1.0-canary.6` 已精确固定并封装在 aimedia 自有类型后。入口在
     协议分配前限制 64 KiB 单次 feed、64 个 chunk stream、8 MiB 默认 message，控制
     发送缓冲限制 1 MiB；已通过任意分块、超大声明、chunk stream spray、流名脱敏、
-    断线隔离和明文发布回环。
+    断线隔离和明文发布回环。证据：[PR #33](https://github.com/anvsk/aimedia/pull/33)。
   - [ ] V3-03C：H.264 Annex-B/AVCC、SPS/PPS、AAC ADTS/raw 和 sequence header
     双向转换。
   - [ ] V3-03D：RTMP listener 输入接入单路原生运行时，断开后等待新 publisher、
