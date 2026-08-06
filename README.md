@@ -32,6 +32,8 @@
 - libsrt caller/listener adapter、重连状态和敏感信息校验；
 - `retina 0.4.19` 后的 RTSP/RTP 会话边界，以及 TCP interleaved H.264/AAC/G.711
   到单路 native runtime 的直接有界接线；
+- 短目录 `crates/rtmp` 中的明文 RTMP listener、FLV AVC/AAC 转换和单路 native
+  runtime 接线；publisher 更换后重新等待配置与 IDR，RTMP 运行指标进入 `state`；
 - libxaac AAC-LC 帧级 adapter、1024-sample 时间线和 native round-trip；
 - 独立节目时钟、固定容量单路调度器、fake transport/codec 验证；
 - NVIDIA SDK 探测、实验性 NVDEC/NVENC 帧后端、GPU 内 NV12 复制与代际 surface lease、
@@ -48,6 +50,8 @@
   只能通过显式转换命令迁移，不会在运行时静默兼容。
 - RTSP TCP 已通过 MediaMTX 外部软件短门禁；物理摄像机认证、两小时长稳、UDP 和
   H.265 bridge 仍未完成，因此保持 `experimental`。
+- RTMP listener 已通过真实 TCP 内部回环，但外部编码器互操作与两小时门禁未完成；
+  RTMP/RTMPS 平台输出仍在 V3-03E，因此不能把当前状态称为完整 RTMP 支持。
 
 单路 SRT 原生 GPU 数据面已通过 FFmpeg/OBS/VLC 互操作、网络损伤、断流恢复和
 [1080p30 两小时门禁](docs/reports/v0.2-native-live-pipe.md)，在固定支持范围内标记为
@@ -63,6 +67,8 @@ cargo run -p aimedia -- explain -f examples/single-srt.yaml --json
 cargo run -p aimedia -- run -f examples/single-srt.yaml --dry-run
 cargo run -p aimedia -- run -f examples/single-srt.yaml --mock
 cargo run -p aimedia -- doctor --json
+# 有 GPU/native codec 环境时：监听 rtmp://0.0.0.0:1935/live/camera，输出 SRT
+cargo run -p aimedia -- run -f examples/rtmp-input.yaml
 ```
 
 迁移旧的 `aimedia/v1alpha1` `DirectorPipeline` 配置：

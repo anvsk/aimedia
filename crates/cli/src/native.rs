@@ -5,6 +5,7 @@ use aimedia_core::{
     config::RtspTransport,
 };
 use aimedia_nvidia::{NvdecConfig, NvdecDecoder, NvencConfig, NvencEncoder};
+use aimedia_rtmp::RtmpPacketSource;
 use aimedia_rtsp::{G711Decoder, RtspCodec, RtspEndpoint, RtspMediaProfile, RtspPacketSource};
 use aimedia_runtime::{
     ControlServer,
@@ -148,6 +149,29 @@ async fn build_backends(config: &PipelineConfig) -> Result<SinglePipelineBackend
             }
         };
         (SingleInput::Packets(Box::new(source)), decoder)
+    } else if input
+        .uri
+        .get(..7)
+        .is_some_and(|scheme| scheme.eq_ignore_ascii_case("rtmp://"))
+    {
+        let rtmp = input
+            .rtmp
+            .as_ref()
+            .ok_or_else(|| anyhow!("rtmpConfigRequired: RTMP input requires inputs[0].rtmp"))?;
+        let source = RtmpPacketSource::bind(&input.uri, rtmp)
+            .await
+            .context("could not bind the RTMP listener input")?;
+        tracing::info!(
+            address = %source.local_addr().context("could not inspect the RTMP listener input")?,
+            "RTMP listener is waiting for one publisher"
+        );
+        (
+            SingleInput::Packets(Box::new(source)),
+            Box::new(
+                aac.audio_decoder()
+                    .context("could not create the native AAC decoder")?,
+            ),
+        )
     } else {
         let input_endpoint =
             Endpoint::from_config(&input.uri, &input.srt, input.secret_ref.as_ref())

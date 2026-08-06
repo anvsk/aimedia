@@ -893,6 +893,7 @@ impl RtspStatsState {
 
     fn snapshot(&self) -> PacketSourceRuntimeStats {
         PacketSourceRuntimeStats {
+            protocol: "rtsp".to_owned(),
             connected: self.connected.load(Ordering::Relaxed),
             transport: match self.transport {
                 RtspTransport::Tcp => "tcp",

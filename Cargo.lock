@@ -20,6 +20,7 @@ dependencies = [
  "aimedia-graph",
  "aimedia-mpegts",
  "aimedia-nvidia",
+ "aimedia-rtmp",
  "aimedia-rtsp",
  "aimedia-runtime",
  "aimedia-srt",
@@ -103,9 +104,11 @@ version = "0.2.0-alpha.1"
 dependencies = [
  "aimedia-core",
  "aimedia-mpegts",
+ "async-trait",
  "bytes",
  "shiguredo_rtmp",
  "thiserror",
+ "tokio",
  "url",
 ]
 

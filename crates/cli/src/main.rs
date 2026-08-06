@@ -563,10 +563,9 @@ async fn command_run(path: &Path, dry_run: bool, mock: bool) -> Result<()> {
             .await
             .context("mock pipeline failed");
     }
-    if config.inputs.iter().any(|input| is_rtmp_uri(&input.uri)) || is_rtmp_uri(&config.output.uri)
-    {
+    if is_rtmp_uri(&config.output.uri) {
         bail!(
-            "rtmpDataPlanePending: RTMP/RTMPS and FLV are declared in the v0.3 graph, but the native adapter is not available yet; use `--dry-run` to inspect the bounded execution plan"
+            "rtmpOutputPendingV3_03E: RTMP/RTMPS publishing is not wired to the native output yet; use an SRT output, or `--dry-run` to inspect this future output plan"
         );
     }
     if config.inputs.len() == 2 {

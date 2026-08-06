@@ -246,11 +246,7 @@ pub fn compile(config: &PipelineConfig) -> Result<ExecutionPlan, CompileError> {
             NodeKind::TransportInput,
             MemoryDomain::Host,
             true,
-            if rtmp {
-                NodeStatus::Pending
-            } else {
-                NodeStatus::AdapterReady
-            },
+            NodeStatus::AdapterReady,
             if rtsp {
                 format!("RTSP/RTP input and bounded depacketizer {}", input.name)
             } else if rtmp {
@@ -259,22 +255,14 @@ pub fn compile(config: &PipelineConfig) -> Result<ExecutionPlan, CompileError> {
                 format!("SRT input {}", input.name)
             },
         ));
-        if !rtsp {
+        if !(rtsp || rtmp) {
             nodes.push(node(
                 &demux,
                 NodeKind::Demux,
                 MemoryDomain::Host,
                 true,
-                if rtmp {
-                    NodeStatus::Pending
-                } else {
-                    NodeStatus::Implemented
-                },
-                if rtmp {
-                    "FLV tag demux plus AVC/AAC normalization".to_owned()
-                } else {
-                    "streaming MPEG-TS demux".to_owned()
-                },
+                NodeStatus::Implemented,
+                "streaming MPEG-TS demux".to_owned(),
             ));
         }
         nodes.extend([
@@ -301,7 +289,7 @@ pub fn compile(config: &PipelineConfig) -> Result<ExecutionPlan, CompileError> {
                 },
             ),
         ]);
-        if rtsp {
+        if rtsp || rtmp {
             edges.extend([
                 edge(
                     &source,
@@ -743,16 +731,17 @@ mod tests {
     }
 
     #[test]
-    fn declares_rtmp_flv_boundaries_as_pending_without_hiding_queue_limits() {
+    fn compiles_rtmp_listener_into_direct_codec_edges_with_pending_output() {
         let config = PipelineConfig::from_yaml(include_str!("../../../examples/rtmp.yaml"))
             .expect("RTMP contract should parse");
         let plan = compile(&config).expect("RTMP graph should compile");
 
         assert_eq!(
-            plan.edge("input.0", "demux.0")
+            plan.edge("input.0", "video.decode.0")
                 .map(|edge| edge.contract.media),
-            Some(MediaType::RtmpMessage)
+            Some(MediaType::H264AccessUnit)
         );
+        assert!(plan.edge("input.0", "demux.0").is_none());
         assert_eq!(
             plan.edge("mux.program", "output.program")
                 .map(|edge| edge.contract.media),
@@ -763,9 +752,6 @@ mod tests {
             .pending_nodes()
             .map(|node| node.id.as_str())
             .collect::<Vec<_>>();
-        assert_eq!(
-            pending,
-            ["input.0", "demux.0", "mux.program", "output.program"]
-        );
+        assert_eq!(pending, ["mux.program", "output.program"]);
     }
 }

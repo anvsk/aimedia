@@ -165,6 +165,7 @@ pub trait PacketSourceObserver: Send + Sync {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PacketSourceRuntimeStats {
+    pub protocol: String,
     pub connected: bool,
     pub transport: String,
     pub packets_received: u64,
