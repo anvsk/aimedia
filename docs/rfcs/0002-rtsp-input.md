@@ -79,6 +79,9 @@ H.264 + AAC/G.711 会在 V3-02 形成真实单路闭环。H.265 在本阶段完�
 - RTP sequence 使用固定重排窗口；超窗、重复或永久缺包只丢弃受影响 access unit。
 - 32-bit RTP timestamp 按流回绕展开，RTCP Sender Report 只用于源时间映射；输出仍由
   aimedia 独立节目时钟生成。
+- 多轨 `PLAY` 的 `RTP-Info` 缺少任一 `rtptime` 时使用 Retina permissive 策略，把各轨
+  第一包映射到 NPT 0；这兼容 MediaMTX 等常见服务端，又不改变输出独立节目时钟。
+  后续 32-bit 时间戳仍受最大 10 秒前跳和非倒退检查约束。
 - 每个流的 RTP 重排、access unit 重组和 adapter 输出队列都有硬上限；NAL/AU 超过
   上限时丢弃当前单元并等待下一个恢复边界。
 - H.264/H.265 在重新连接、SSRC 改变、sequence 跳变或参数集变化后等待下一张可独立
@@ -90,7 +93,8 @@ TCP 会话恢复由 `crates/rtsp` 内部完成：读超时、对端断流或可�
 会把连接状态置为 false，按 MediaJob 配置做有上限的指数退避。新会话必须重新完成
 `DESCRIBE/SETUP/PLAY` 并与初始音视频规格兼容；否则返回稳定的
 `mediaProfileChanged` 错误。重连期间不建立媒体队列，节目时钟继续走最后健康画面和
-静音路径。
+静音路径。已经建立的输入重连时，`DESCRIBE 404` 表示发布路径暂时离线并继续退避；
+首次启动仍立即返回错误，401/403 和其他不可恢复 4xx 也不会无限重试。
 
 固定的 Retina 0.4.19 尚无 UDP 重排缓冲，并且在它生成公开
 `PacketItem` 之前就会丢弃乱序包，因此 aimedia 无法在 adapter 外层恢复这些包。截至
@@ -163,7 +167,8 @@ payload 损坏必须使用稳定阶段码。可恢复的网络/会话错误只�
   G.711 解码、大小上限和错误码。
 - 互操作：FFmpeg 测试 server、MediaMTX，以及至少两台不同厂商或两个 ONVIF 合规设备；
   每项记录型号/固件/transport/codec，模拟器不能替代真实设备证据。
-- 网络：TCP 与 UDP、1% 丢包、20ms 抖动、40ms RTT、会话超时、401 重试、输入重连。
+- 网络：TCP、1% 丢包、20ms 抖动、40ms RTT、会话超时、401 拒绝和输入重连；UDP
+  按 V3-02D 的产品决策延后，不属于 v0.3 发布门槛。
 - GPU 闭环：H.264 + AAC/G.711 输入，1080p30 输出 SRT，PTS/DTS/PCR 单调；H.265 只验
   depacketizer，直到 V3-04 才升级完整支持。
 - 稳定性：两小时运行中所有队列和重组缓存有水位，RSS/GPU 内存不持续增长；凭证不在

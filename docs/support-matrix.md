@@ -24,7 +24,7 @@
 | BS.1770/4x true-peak DSP | foundation | 响度、增益、淡化和 limiter 已实现；AAC 帧级 codec 已就绪，待接运行时音频链 |
 | SRT caller/listener | supported | libsrt 1.5.5 adapter、epoll、指数退避和断开后 native 重连已测；caller/listener 四种组合、断流恢复、1% 丢包/20ms 抖动/40ms RTT 及两小时长稳已验证 |
 | RTMP/RTMPS + FLV | planned | v0.3 跨区域平台发布基线 |
-| RTSP/RTP input | experimental | `aimedia run` 已接 TCP interleaved 单路数据面：RTP 拆包后的 H.264/AAC-LC/G.711 直接进入有界 codec 队列，G.711 8kHz 单声道归一到 48kHz 双声道，状态报告连接、媒体包、丢包、重连和最后数据时间；H.265 已能重组成类型化 Annex-B access unit，但 NVDEC HEVC 到 NVENC H.264 bridge 仍返回 `videoBridgePending`。当前明确拒绝 UDP 和非 48kHz 双声道 AAC，尚未通过外部摄像机、GPU 闭环、网络损伤或长稳，不代表 GB28181 支持 |
+| RTSP/RTP input | experimental | `aimedia run` 已接 TCP interleaved 单路数据面：H.264/AAC-LC/G.711 直接进入有界 codec 队列，G.711 8kHz 单声道归一到 48kHz 双声道；MediaMTX 1.20.0 + FFmpeg 发布端已通过 180 秒 GPU 闭环、发布源 404 重连和 40ms RTT/20ms 抖动/1% 丢包短门禁，p95 90ms 且输出时间戳零回退。H.265 可重组为 Annex-B access unit，但 HEVC bridge 仍返回 `videoBridgePending`；UDP、非 48kHz 双声道 AAC、物理摄像机认证和两小时长稳未完成，不代表 GB28181 支持 |
 | 多输出与 Analyzer Tap | planned | v0.4；每个支路独立有界并与媒体主链隔离 |
 | WHIP output | planned | v0.6 以后按真实服务采用证据评估；H.264/Opus |
 | NVDEC | supported | H.264 parser callback、NV12 map/unmap、代际 surface lease、discontinuity/IDR 闸门已实现；RTX 5060 Laptop、577.12 驱动完成两小时真实解码，零丢帧、surface 高水位 3/4 |
