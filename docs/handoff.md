@@ -4,7 +4,7 @@
 
 暂停点：V3-04A/B/D 完成；V3-04C 修复后的 HEVC RTSP 完整短门槛按用户要求未继续重跑
 
-Git 基线：`main` 的 `13c0f67`，交付分支 `codex/feat/hevc-bridge`（PR 待创建）
+Git 基线：`main` 的 `13c0f67`，交付分支 `codex/feat/hevc-bridge`，PR #41
 
 ## 先读结论
 
@@ -29,7 +29,7 @@ Git 基线：`main` 的 `13c0f67`，交付分支 `codex/feat/hevc-bridge`（PR �
 | RTMP publisher ACK 竞态修复 | 本交付 | PR #38；`anvsk/rtmp-rs@00e97a6` |
 | OBS RTMP publisher/consumer 与实际渲染 | 本交付 | PR #39；`tools/interop.ps1 -Suite rtmp-obs`；`docs/reports/rtmp.md` |
 | 平台签名 query、`publish-check` 与脱敏平台报告 | 当前交付 | PR #40；`tools/platform.ps1`；`docs/reports/platforms.md` |
-| HEVC codec-selectable NVDEC 与 SDP runtime 接线 | 当前交付 | `codex/feat/hevc-bridge`；`docs/rfcs/0004-hevc-bridge.md` |
+| HEVC codec-selectable NVDEC 与 SDP runtime 接线 | 当前交付 | PR #41；`docs/rfcs/0004-hevc-bridge.md` |
 | HEVC 单 IRAP 真实 GPU 解码与 Linux SDK release build | 已通过 | `docs/reports/hevc.md` |
 | 修复后的 HEVC RTSP 到 H.264/SRT 完整短门槛 | 未完成 | 两次运行发现的问题均已修复，但按用户要求未第三次重跑 |
 | RTMP 真实平台、完整两小时 soak | 未完成 | 保持 `experimental` |
