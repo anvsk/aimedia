@@ -51,10 +51,11 @@
   只能通过显式转换命令迁移，不会在运行时静默兼容。
 - RTSP TCP 已通过 MediaMTX 外部软件短门禁；物理摄像机认证、两小时长稳、UDP 和
   H.265 bridge 仍未完成，因此保持 `experimental`。
-- RTMP listener 与 publisher 已通过 FFmpeg -> aimedia GPU -> MediaMTX 的 180 秒外部
-  门禁，覆盖输入/输出重连、网络损伤、IDR 恢复和节目 PTS 连续；RTMPS 使用公开
-  WebPKI 信任根，不提供跳过校验开关。OBS、真实平台 endpoint、RTMPS 实站和两小时
-  门禁仍在 V3-03F，因此整体仍是 `experimental`。
+- RTMP listener 与 publisher 已通过 FFmpeg、OBS 和 MediaMTX 外部门禁，覆盖实际渲染、
+  输入/输出重连、网络损伤、IDR 恢复和节目 PTS 连续；RTMPS 使用公开 WebPKI 信任根，
+  不提供跳过校验开关。平台 stream key 和腾讯/阿里/Twitch 等签名 query 可分别通过
+  secret reference 传入，`publish-check` 能在不启动 GPU 媒体链时预检发布授权。至少
+  两个真实平台成功接收媒体及两小时门禁仍在 V3-03F，因此整体仍是 `experimental`。
 
 单路 SRT 原生 GPU 数据面已通过 FFmpeg/OBS/VLC 互操作、网络损伤、断流恢复和
 [1080p30 两小时门禁](docs/reports/v0.2-native-live-pipe.md)，在固定支持范围内标记为
@@ -74,6 +75,8 @@ cargo run -p aimedia -- doctor --json
 cargo run -p aimedia -- run -f examples/rtmp-input.yaml
 # 有 GPU/native codec 环境时：SRT 输入，发布到 RTMPS（先设置流密钥环境变量）
 AIMEDIA_RTMP_STREAM_NAME='<stream-key>' cargo run -p aimedia -- run -f examples/rtmp-output.yaml
+# 不打开输入或 GPU，只检查 RTMP(S) endpoint、证书、握手和 publish 授权
+AIMEDIA_RTMP_STREAM_NAME='<stream-key>' cargo run -p aimedia -- publish-check -f examples/rtmp-output.yaml --json
 ```
 
 迁移旧的 `aimedia/v1alpha1` `DirectorPipeline` 配置：
@@ -131,6 +134,7 @@ crates/
 - [市场支持策略](docs/market-support.md)
 - [支持矩阵](docs/support-matrix.md)
 - [RTSP 互操作报告](docs/reports/rtsp.md)
+- [平台发布门槛报告](docs/reports/platforms.md)
 - [v0.2 Release Notes](docs/releases/v0.2.md)
 
 ## 许可证

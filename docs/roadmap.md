@@ -217,14 +217,27 @@ v0.3 工程。只有 V2-11 也完成后，总览才把 v0.2 标记为完全完�
       [RTMP 互操作报告](reports/rtmp.md)。交付：
       [PR #39](https://github.com/anvsk/aimedia/pull/39)。
     - [ ] V3-03F3：至少两个真实平台 endpoint，覆盖 RTMPS 证书和鉴权路径。
+      - [x] V3-03F3a：安全平台凭证契约与前置门槛。`publishQueryRef` 允许腾讯云
+        `txSecret/txTime`、阿里云 `auth_key` 和 Twitch `bandwidthtest=true` 以环境变量或
+        挂载文件引用，URI 和报告仍不包含这些值；`aimedia publish-check` 不启动输入、
+        codec 或 GPU，只检查 TCP/TLS/RTMP publish；`tools/platform.ps1` 为失败和成功都
+        生成脱敏的阶段化报告。证据：[平台发布门槛报告](reports/platforms.md)；交付：
+        [PR #40](https://github.com/anvsk/aimedia/pull/40)。
+      - [x] V3-03F3b：门槛自身的 accepted/failed 路径验证。固定 MediaMTX 1.20.0 的
+        本地真实 TCP 服务返回 accepted；YouTube RTMPS 与 Twitch 新加坡 endpoint 在
+        当前网络均映射到 `198.18.0.0/15` 代理地址，并在 RTMP Handshake 阶段失败，
+        同容器 FFmpeg 结果一致。该诊断不能冒充平台兼容通过。
+      - [ ] V3-03F3c：使用真实测试频道或临时授权，让至少两个目标平台接受 publish，
+        再各运行不少于 30 秒媒体链并保存平台控制台健康状态；至少一条必须是 RTMPS。
     - [ ] V3-03F4：1080p30 两小时 GPU soak、资源趋势和原始证据附件。2026-08-06 的
       一次运行在 2,911 秒按用户要求主动停止；容器已清理，部分样本已记录，但该门槛
       仍未完成。
 - [ ] **V3-04 HEVC Bridge**：H.265 输入转 H.264 输出。
 - [ ] **V3-05 格式归一化**：720p/1080p、25/30/50/60fps、横竖屏、44.1/48kHz
   和单/双声道。
-- [ ] **V3-06 平台互操作**：腾讯云、阿里云、YouTube 非公开直播和 Twitch bandwidth
-  test 真实验证。
+- [ ] **V3-06 平台互操作**：在 V3-03F3 的“两平台最低门槛”之后补齐腾讯云、阿里云、
+  YouTube 非公开直播和 Twitch bandwidth test 四个平台矩阵；没有真实账号证据的项
+  继续标记 `experimental`。
 - [ ] **V3-07 可诊断连接**：分阶段 DNS/TLS/鉴权/格式错误，敏感信息不进入日志。
 - [ ] **V3-08 发布**：两小时跨协议 soak、支持矩阵、版本 Release 和社区兼容报告。
 

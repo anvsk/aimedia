@@ -430,6 +430,21 @@ async fn complete_handshake(
             ));
         }
         let events = session.feed(&incoming[..received])?;
+        if events.iter().any(|event| {
+            matches!(
+                event,
+                SessionEvent::RequestRejected {
+                    kind: crate::RequestKind::Publish
+                }
+            )
+        }) {
+            return Err(RtmpError::new(
+                RtmpErrorCode::PublishRejected,
+                RtmpErrorStage::Command,
+                false,
+                "RTMP peer rejected the publishing request; verify endpoint authorization and stream availability",
+            ));
+        }
         if events
             .iter()
             .any(|event| matches!(event, SessionEvent::PeerDisconnected))
@@ -645,6 +660,7 @@ mod tests {
             mode: RtmpMode::Publish,
             stream_name: Some("program".to_owned()),
             stream_name_ref: None,
+            publish_query_ref: None,
             connect_timeout_ms: 1_000,
             handshake_timeout_ms: 3_000,
             read_timeout_ms: 1_000,
@@ -840,6 +856,7 @@ mod tests {
             mode: RtmpMode::Publish,
             stream_name: Some("program".to_owned()),
             stream_name_ref: None,
+            publish_query_ref: None,
             connect_timeout_ms: 1_000,
             handshake_timeout_ms: 3_000,
             read_timeout_ms: 1_000,

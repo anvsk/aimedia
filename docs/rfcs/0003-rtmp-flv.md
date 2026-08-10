@@ -100,6 +100,9 @@ outputs:
       mode: publish
       streamNameRef:
         env: AIMEDIA_RTMP_STREAM_NAME
+      # Optional: signed query without the leading question mark.
+      publishQueryRef:
+        env: AIMEDIA_RTMP_PUBLISH_QUERY
 ```
 
 规则：
@@ -107,13 +110,16 @@ outputs:
 - 输入只接受 `rtmp://` + `mode: listen`；Alpha 不提供 RTMPS listener。
 - 输出接受 `rtmp://` 或 `rtmps://` + `mode: publish`。
 - `streamName` 与 `streamNameRef` 必须二选一；任何凭证都必须使用引用。
+- `publishQueryRef` 仅允许 publisher 输出使用，用于腾讯/阿里签名参数或 Twitch
+  bandwidth test；它必须是 secret reference，不能写成普通字符串。
 - URI userinfo、query、fragment 和尾随 `/` 被拒绝，避免 stream key 混入错误或日志。
 - `connectTimeoutMs` 管 TCP，`handshakeTimeoutMs` 管 TLS/RTMP 建连，`readTimeoutMs`
   管建连后的对端失活。
 - `maxMessageBytes` 默认 8 MiB，可配置范围 64 KiB—16 MiB。
 
-当前 `aimedia explain` 和 `aimedia run --dry-run` 会展示完整 pending 图；真实运行会在
-打开网络、codec 或 GPU 前返回 `rtmpDataPlanePending`。
+V3-03D/E 已把 listener 和 publisher 接入真实单路运行时。`aimedia publish-check` 还可
+只建立输出会话，在不打开输入、codec 或 GPU 的情况下检查 endpoint、RTMPS 证书、RTMP
+握手和 publish 授权；它不能替代真实媒体接收门槛。
 
 ## Rust 依赖决定
 

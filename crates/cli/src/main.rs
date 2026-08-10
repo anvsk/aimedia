@@ -7,7 +7,7 @@ use std::{
 use aimedia_aac::Libxaac;
 use aimedia_core::{
     CameraSnapshot, ControlRequest, ControlResponse, Director, PipelineConfig,
-    backend::Transport,
+    backend::{PacketSink, Transport},
     config::{SrtConfig, SrtMode},
     convert_legacy_yaml,
     vlm::VlmAdvice,
@@ -15,6 +15,7 @@ use aimedia_core::{
 use aimedia_graph::{ExecutionPlan, compile as compile_plan};
 use aimedia_mpegts::{DemuxEvent, MuxStream, ProgramMap, StreamDemuxer, StreamPacket, probe_path};
 use aimedia_nvidia::NvidiaLibraries;
+use aimedia_rtmp::RtmpPacketSink;
 use aimedia_runtime::{run_mock_pipeline, send_control_request};
 use aimedia_srt::{Endpoint, SrtTransport, probe_version as probe_srt_version};
 use anyhow::{Context, Result, bail};
@@ -96,6 +97,13 @@ enum Command {
         /// Return a non-zero status unless SRT, NVIDIA, and AAC libraries are all ready.
         #[arg(long)]
         strict: bool,
+    },
+    /// Validate an RTMP/RTMPS endpoint, TLS certificate, and publishing authorization.
+    PublishCheck {
+        #[arg(short = 'f', long)]
+        file: PathBuf,
+        #[arg(long)]
+        json: bool,
     },
     /// Inspect or migrate versioned media job configuration.
     Config {
@@ -252,8 +260,42 @@ async fn main() -> Result<()> {
         } => command_bench(&file, &capture, iterations),
         Command::Control { socket, action } => command_control(&socket, action).await,
         Command::Doctor { json, strict } => command_doctor(json, strict),
+        Command::PublishCheck { file, json } => command_publish_check(&file, json).await,
         Command::Config { action } => command_config(action),
     }
+}
+
+async fn command_publish_check(path: &Path, output_json: bool) -> Result<()> {
+    let config = load_config(path)?;
+    let rtmp = config
+        .output
+        .rtmp
+        .as_ref()
+        .context("rtmpConfigRequired: publish-check requires an RTMP/RTMPS output")?;
+    let started = Instant::now();
+    let mut sink = RtmpPacketSink::connect(&config.output.uri, rtmp)
+        .await
+        .context("RTMP/RTMPS publish check failed")?;
+    sink.close()
+        .await
+        .context("RTMP/RTMPS publish check could not close cleanly")?;
+    let report = json!({
+        "accepted": true,
+        "endpoint": config.output.uri,
+        "tls": config.output.uri.get(..8).is_some_and(|scheme| scheme.eq_ignore_ascii_case("rtmps://")),
+        "elapsedMs": started.elapsed().as_secs_f64() * 1000.0,
+        "credentialsPrinted": false,
+    });
+    if output_json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!(
+            "publish accepted by {} in {:.1} ms",
+            report["endpoint"].as_str().unwrap_or("RTMP endpoint"),
+            report["elapsedMs"].as_f64().unwrap_or_default()
+        );
+    }
+    Ok(())
 }
 
 fn command_config(action: ConfigAction) -> Result<()> {
