@@ -1,10 +1,10 @@
 # 暂停交接：v0.3 Normalize & Bridge
 
-更新时间：2026-08-06
+更新时间：2026-08-10
 
-暂停点：V3-03F1 的 RTMP 长连接 ACK 修复与 420 秒故障回归完成后
+暂停点：V3-03F2 的 OBS RTMP 发布、接收和实际渲染门槛完成后
 
-Git 基线：`main` 的 `acc06d2`，交付分支 `codex/feat/rtmp-soak`
+Git 基线：`main` 的 `6b86a7b`，交付分支 `codex/feat/rtmp-obs`
 
 ## 先读结论
 
@@ -26,13 +26,20 @@ Git 基线：`main` 的 `acc06d2`，交付分支 `codex/feat/rtmp-soak`
 | RTMP/FLV 契约、会话、AVC/AAC 转换、listener、RTMP/RTMPS publisher | 已合并 | PR #32—#36 |
 | RTMP FFmpeg -> aimedia -> MediaMTX 180/420 秒故障门禁 | 本交付 | PR #38；`docs/reports/rtmp.md` |
 | RTMP publisher ACK 竞态修复 | 本交付 | PR #38；`anvsk/rtmp-rs@00e97a6` |
-| RTMP OBS、真实平台、完整两小时 soak | 未完成 | 保持 `experimental` |
+| OBS RTMP publisher/consumer 与实际渲染 | 本交付 | PR #39；`tools/interop.ps1 -Suite rtmp-obs`；`docs/reports/rtmp.md` |
+| RTMP 真实平台、完整两小时 soak | 未完成 | 保持 `experimental` |
 | v0.4 多输出与 AI Tap | 未开始 | 暂停期间不要开发 |
 
 V3-03F 短门禁在 RTX 5060 Laptop + 577.12 上运行 180 秒。修复 ACK 竞态后又运行
 420 秒：输入和输出各只有一次计划内重连，网络损伤为 40ms RTT、20ms 抖动、1% 丢包；
 p95 141ms，音视频 PTS 单调，恢复片段首视频包为 keyframe，队列最高 1/1、surface
 最高 3/4，运行镜像无 FFmpeg/libav。
+
+V3-03F2 使用 OBS 30.0.2.1 完成两条 20 秒独立链路。OBS publisher 经 aimedia GPU
+转码和 MediaMTX 后，ffprobe 读到 581 个 H.264 视频包与 948 个 AAC 音频包，首视频包
+为 keyframe，PTS/DTS 单调。反向链路由 OBS Media Source 实际渲染 1280x720 彩条，
+PNG 解码后检测到 13 种颜色；OBS、aimedia 均正常退出。运行镜像再次确认没有
+FFmpeg/ffprobe 或 `libav*`。
 
 两小时测试使用相同镜像启动，按用户要求在 2,911 秒主动停止，容器与网络已清理。停止
 前输入/输出仍连接，重连 1/1，p95 72ms，RSS 约 229 MiB，隔离设备显存 180 MiB；因为
@@ -76,13 +83,11 @@ FFmpeg 和 MediaMTX 只属于测试端，不进入运行镜像。
 
 按以下顺序关闭门槛：
 
-1. 复用 `tools/obs.py` 的隔离 HOME 和 obs-websocket 方式，增加 OBS RTMP publisher 与
-   consumer 门禁；必须检查实际渲染帧和 ffprobe，不只看连接状态。
-2. 用户提供测试直播账号或临时 stream key 后，验证至少两个 endpoint。建议一条国内
+1. 用户提供测试直播账号或临时 stream key 后，验证至少两个 endpoint。建议一条国内
    通用 RTMP/RTMPS、一条海外 RTMPS；凭证只通过环境变量或挂载文件传入，日志不得输出。
-3. 如果上述互操作带来代码变更，先重新跑 420 秒 ACK 与故障回归；输入/输出重连必须
+2. 如果上述互操作带来代码变更，先重新跑 420 秒 ACK 与故障回归；输入/输出重连必须
    仍严格等于计划次数。
-4. 用户允许继续长稳测试后，重新跑满 1080p30 两小时门禁并保存 summary/samples 到
+3. 用户允许继续长稳测试后，重新跑满 1080p30 两小时门禁并保存 summary/samples 到
    GitHub Release。不要把本次 2,911 秒的中止运行拼接或折算为通过：
 
 ```powershell
@@ -99,7 +104,7 @@ pwsh ./tools/rtmp.ps1 `
   -SampleIntervalSeconds 30
 ```
 
-5. 全部通过后才勾选 V3-03F、更新支持矩阵并考虑 v0.3 Release。
+4. 全部通过后才勾选 V3-03F、更新支持矩阵并考虑 v0.3 Release。
 
 本轮新增的 ACK 修复已经完成，无需下次重新定位：
 
@@ -183,5 +188,5 @@ pwsh ./tools/rtmp.ps1 -EngineImage aimedia:rtmp-next -DurationSeconds 420 `
 ## 暂停原则
 
 本交付合并后按用户要求停止开发，不创建 v0.4 分支，不继续后台测试，也不发布“RTMP
-已 supported”的社区广告。下次恢复时依次完成 V3-03F2 OBS、V3-03F3 真实平台和
-V3-03F4 完整两小时长稳；优先补外部证据，不继续增加新协议或格式。
+已 supported”的社区广告。下次恢复时依次完成 V3-03F3 真实平台和 V3-03F4 完整
+两小时长稳；优先补外部证据，不继续增加新协议或格式。

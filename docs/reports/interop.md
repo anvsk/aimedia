@@ -65,14 +65,11 @@ Media Source 读取 aimedia SRT 并截取实际渲染帧。
 | 角色 | 运行时间 | 结果 |
 |---|---:|---|
 | OBS 作为输入 | 8s | 输出 300 个视频包、469 个音频包；首视频包为 keyframe；PTS/DTS 单调 |
-| OBS 作为输出 | 8s | SRT 输入/输出均连接；渲染出 1,416 字节彩条 PNG；aimedia 退出码 0 |
+| OBS 作为输出 | 8s | SRT 输入/输出均连接；渲染出 1,424 字节彩条 PNG，解码后检测到 16 种颜色；aimedia 退出码 0 |
 
-两条场景的 obs-websocket controller 和 aimedia 均正常退出。当前本机临时桌面工具
-镜像中的 OBS 在日志已经报告 `Number of memory leaks: 0` 后，于测试 teardown 阶段
-出现 segmentation fault，因此报告中的 `cleanShutdown=false`。这不改变媒体互操作
-结果，但也不把测试工具退出质量伪装为通过。仓库中的 `desktop` target 已改用固定
-Ubuntu 基础镜像，避免继承 FFmpeg 工具镜像的第二套 libav/libsrt；本机受镜像源下载
-速度影响，尚未完成该纯净 target 的全量重建。
+两条场景的 obs-websocket controller、OBS 和 aimedia 均正常退出。桌面工具镜像使用
+固定 Ubuntu 基础镜像，避免继承 FFmpeg 工具镜像的第二套 libav/libsrt。渲染门槛会
+解码 PNG 像素并检查颜色多样性，不再以压缩后文件大小推断画面是否有效。
 
 ## VLC 输出
 
@@ -114,8 +111,6 @@ SRT 突发交付时替换仍然有效的帧，因此 V2-09 将它收紧为容量
 
 - 延迟 output listener 的 NVDEC 205 已有失败对照、容量 1 背压和零丢帧修复回归；
   V2-09 的两小时 1080p30 soak、延迟 p95 和 RSS/GPU 内存趋势由独立性能报告记录。
-- OBS 的 `cleanShutdown=false` 是当前本机测试工具镜像的独立已知问题；它不会改写
-  aimedia 的退出码或媒体结果。
 - 本报告证明 v0.2 支持范围内的外部互操作，不证明 RTMP、RTSP、H.265、缩放、变帧率
   或双路导播能力。
 
