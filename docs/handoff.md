@@ -27,7 +27,7 @@ Git 基线：`main` 的 `afcda07`，交付分支 `codex/feat/platform-gate`
 | RTMP FFmpeg -> aimedia -> MediaMTX 180/420 秒故障门禁 | 本交付 | PR #38；`docs/reports/rtmp.md` |
 | RTMP publisher ACK 竞态修复 | 本交付 | PR #38；`anvsk/rtmp-rs@00e97a6` |
 | OBS RTMP publisher/consumer 与实际渲染 | 本交付 | PR #39；`tools/interop.ps1 -Suite rtmp-obs`；`docs/reports/rtmp.md` |
-| 平台签名 query、`publish-check` 与脱敏平台报告 | 当前交付 | `tools/platform.ps1`；`docs/reports/platforms.md` |
+| 平台签名 query、`publish-check` 与脱敏平台报告 | 当前交付 | PR #40；`tools/platform.ps1`；`docs/reports/platforms.md` |
 | RTMP 真实平台、完整两小时 soak | 未完成 | 保持 `experimental` |
 | v0.4 多输出与 AI Tap | 未开始 | 暂停期间不要开发 |
 

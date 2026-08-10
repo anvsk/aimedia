@@ -221,7 +221,8 @@ v0.3 工程。只有 V2-11 也完成后，总览才把 v0.2 标记为完全完�
         `txSecret/txTime`、阿里云 `auth_key` 和 Twitch `bandwidthtest=true` 以环境变量或
         挂载文件引用，URI 和报告仍不包含这些值；`aimedia publish-check` 不启动输入、
         codec 或 GPU，只检查 TCP/TLS/RTMP publish；`tools/platform.ps1` 为失败和成功都
-        生成脱敏的阶段化报告。证据：[平台发布门槛报告](reports/platforms.md)。
+        生成脱敏的阶段化报告。证据：[平台发布门槛报告](reports/platforms.md)；交付：
+        [PR #40](https://github.com/anvsk/aimedia/pull/40)。
       - [x] V3-03F3b：门槛自身的 accepted/failed 路径验证。固定 MediaMTX 1.20.0 的
         本地真实 TCP 服务返回 accepted；YouTube RTMPS 与 Twitch 新加坡 endpoint 在
         当前网络均映射到 `198.18.0.0/15` 代理地址，并在 RTMP Handshake 阶段失败，
