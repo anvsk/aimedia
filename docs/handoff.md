@@ -2,9 +2,9 @@
 
 更新时间：2026-08-10
 
-暂停点：V3-03F3a/F3b 的平台安全凭证与前置发布门槛完成后；真实平台 accepted 尚未完成
+暂停点：V3-04A/B/D 完成；V3-04C 修复后的 HEVC RTSP 完整短门槛按用户要求未继续重跑
 
-Git 基线：`main` 的 `afcda07`，交付分支 `codex/feat/platform-gate`
+Git 基线：`main` 的 `13c0f67`，交付分支 `codex/feat/hevc-bridge`（PR 待创建）
 
 ## 先读结论
 
@@ -13,8 +13,9 @@ Git 基线：`main` 的 `afcda07`，交付分支 `codex/feat/platform-gate`
 再发布到平台；不做 CDN、播放器或 FFmpeg 全格式复刻。
 
 已经 `supported` 的市场闭环仍是单路 SRT/MPEG-TS。RTSP 和 RTMP 已有真实 GPU 数据面，
-但设备、平台或长稳证据不完整，必须继续标记 `experimental`。暂停后不要进入 v0.4，
-应先关闭本文件列出的 v0.3 外部门槛。
+但设备、平台或长稳证据不完整，必须继续标记 `experimental`。受限 HEVC 输入桥接代码
+已经接入，完整 RTSP 闭环复验前单独保持 `foundation`。暂停后不要进入 v0.4，应先关闭
+本文件列出的 v0.3 外部门槛。
 
 ## 已交付到哪里
 
@@ -28,6 +29,9 @@ Git 基线：`main` 的 `afcda07`，交付分支 `codex/feat/platform-gate`
 | RTMP publisher ACK 竞态修复 | 本交付 | PR #38；`anvsk/rtmp-rs@00e97a6` |
 | OBS RTMP publisher/consumer 与实际渲染 | 本交付 | PR #39；`tools/interop.ps1 -Suite rtmp-obs`；`docs/reports/rtmp.md` |
 | 平台签名 query、`publish-check` 与脱敏平台报告 | 当前交付 | PR #40；`tools/platform.ps1`；`docs/reports/platforms.md` |
+| HEVC codec-selectable NVDEC 与 SDP runtime 接线 | 当前交付 | `codex/feat/hevc-bridge`；`docs/rfcs/0004-hevc-bridge.md` |
+| HEVC 单 IRAP 真实 GPU 解码与 Linux SDK release build | 已通过 | `docs/reports/hevc.md` |
+| 修复后的 HEVC RTSP 到 H.264/SRT 完整短门槛 | 未完成 | 两次运行发现的问题均已修复，但按用户要求未第三次重跑 |
 | RTMP 真实平台、完整两小时 soak | 未完成 | 保持 `experimental` |
 | v0.4 多输出与 AI Tap | 未开始 | 暂停期间不要开发 |
 
@@ -77,10 +81,10 @@ docs/         路线图、RFC、报告和本交接
 
 ```text
 SRT/TS | RTSP/RTP | RTMP/FLV
-        -> 公共 H.264/AAC packet
+        -> 公共压缩 packet（RTSP 可为 H.264/HEVC，其余输入仍为 H.264）
         -> NVDEC + libxaac decode
         -> 独立节目时钟与有界队列
-        -> NVENC + libxaac encode
+        -> NVENC H.264 + libxaac encode
         -> TS/SRT | FLV/RTMP(S)
 ```
 
@@ -88,6 +92,21 @@ SRT/TS | RTSP/RTP | RTMP/FLV
 FFmpeg 和 MediaMTX 只属于测试端，不进入运行镜像。
 
 ## 必须先处理的未完成项
+
+### 0. HEVC V3-04C
+
+V3-04A/B/D 已完成：`NvdecCodec` 固定 H.264/HEVC parser 与 capability，RTSP 根据 SDP
+选择 decoder，执行图使用 `compressedVideo` 表达运行时确定的 RTSP 视频 codec；SRT/TS
+和传统 RTMP 仍为 H.264。RTX 5060 Laptop 已把 1080p HEVC Main IRAP 解成共享 NV12
+surface，完整 Linux SDK 13.0 release build 通过。
+
+第一次 RTSP 门槛因 relay 丢失 random-access 标记而把 2,393 个视频 AU 全部挡在恢复
+闸门外；adapter 现在从 Annex-B NAL type 兜底识别 H.264 IDR 5 和 HEVC IRAP 16—23。
+第二次门槛在参数/预热 AU 上触发 `NVDEC parser produced a frame before format`；根因是
+空 display queue 被误判为已有帧，现已改成只有真实 display callback 才要求 format。
+按用户要求没有继续第三次 90 秒运行，所以 V3-04C 与总 V3-04 不得打勾。下次若用户允许
+短验证，只需重跑 `tools/rtsp.ps1 -VideoCodec hevc`，不必重新定位这两个问题。完整细节见
+[HEVC 验证记录](reports/hevc.md)。
 
 ### 1. RTMP V3-03F
 
@@ -183,7 +202,8 @@ keepalive timer 可能饥饿，MediaMTX 最终按 read timeout 关闭 reader；�
 - 当前平台报告只证明门槛成功/失败分层；YouTube/Twitch 的本轮结果受本机代理路径阻断，
   没有真实 accepted 媒体证据。
 - RTMP 只支持传统 FLV AVC/AAC，不支持 Enhanced RTMP、HEVC、AV1、观众播放或 GOP cache。
-- RTSP 只支持 TCP interleaved；UDP、H.265 到 H.264 bridge 尚未完成。
+- RTSP 只支持 TCP interleaved；H.265 到 H.264 bridge 的代码与单帧 GPU proof 已完成，
+  修复后的完整软件源闭环未复验；UDP 尚未实现。
 - 不要把 `foundation`、内部回环或 180 秒短门禁写成生产支持。
 - 社区账号仍受 Hacker News / Reddit 新账号审核限制，不得刷帖、刷评论或规避过滤。
 

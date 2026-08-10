@@ -3,6 +3,8 @@ param(
     [string]$EngineImage = "aimedia:gpu",
     [string]$PeerImage = "aimedia:test-tools",
     [string]$MediaImage = "bluenviron/mediamtx:1.20.0@sha256:86e63af28616d5e5a18540d7b031b6510bd4cbf1a3c7d224f9e2976f02aefbfb",
+    [ValidateSet("h264", "hevc")]
+    [string]$VideoCodec = "h264",
     [ValidateRange(90, 86400)]
     [int]$DurationSeconds = 180,
     [ValidateRange(10, 82800)]
@@ -171,21 +173,35 @@ function Wait-MediaServer {
 }
 
 function Start-Source {
-    Start-Container -Name $source -Arguments @(
+    $arguments = @(
         "--network", $network,
         "--entrypoint", "ffmpeg",
         $PeerImage,
         "-hide_banner", "-loglevel", "warning", "-re",
         "-f", "lavfi", "-i", "smptebars=size=1920x1080:rate=30",
         "-f", "lavfi", "-i", "sine=frequency=997:sample_rate=48000",
-        "-t", "$($DurationSeconds + 90)",
-        "-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency",
-        "-profile:v", "main", "-pix_fmt", "yuv420p", "-bf", "0",
-        "-g", "30", "-keyint_min", "30", "-sc_threshold", "0", "-b:v", "6000k",
+        "-t", "$($DurationSeconds + 90)"
+    )
+    if ($VideoCodec -eq "hevc") {
+        $arguments += @(
+            "-c:v", "libx265", "-preset", "ultrafast", "-tune", "zerolatency",
+            "-profile:v", "main", "-pix_fmt", "yuv420p", "-b:v", "6000k",
+            "-x265-params", "bframes=0:keyint=30:min-keyint=30:scenecut=0:repeat-headers=1"
+        )
+    }
+    else {
+        $arguments += @(
+            "-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency",
+            "-profile:v", "main", "-pix_fmt", "yuv420p", "-bf", "0",
+            "-g", "30", "-keyint_min", "30", "-sc_threshold", "0", "-b:v", "6000k"
+        )
+    }
+    $arguments += @(
         "-c:a", "aac", "-b:a", "128k", "-ar", "48000", "-ac", "2",
         "-f", "rtsp", "-rtsp_transport", "tcp",
         "rtsp://${media}:8554/camera"
     )
+    Start-Container -Name $source -Arguments $arguments
 }
 
 function Set-Netem {
@@ -308,7 +324,7 @@ $config = @"
 apiVersion: aimedia/v1alpha2
 kind: MediaJob
 metadata:
-  name: rtsp-interop
+  name: rtsp-$VideoCodec-interop
 inputs:
   - name: camera
     role: custom
@@ -543,6 +559,7 @@ try {
             media = [pscustomobject]@{ name = $MediaImage; digest = $mediaDigest }
         }
         requestedDurationSeconds = $DurationSeconds
+        inputVideoCodec = $VideoCodec
         fault = [pscustomobject]@{
             atSeconds = $FaultAtSeconds
             durationSeconds = $FaultSeconds

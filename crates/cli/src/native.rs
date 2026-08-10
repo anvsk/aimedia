@@ -4,7 +4,7 @@ use aimedia_core::{
     backend::{AudioDecoder, PacketSource},
     config::RtspTransport,
 };
-use aimedia_nvidia::{NvdecConfig, NvdecDecoder, NvencConfig, NvencEncoder};
+use aimedia_nvidia::{NvdecCodec, NvdecConfig, NvdecDecoder, NvencConfig, NvencEncoder};
 use aimedia_rtmp::{RtmpPacketSink, RtmpPacketSource};
 use aimedia_rtsp::{G711Decoder, RtspCodec, RtspEndpoint, RtspMediaProfile, RtspPacketSource};
 use aimedia_runtime::{
@@ -77,18 +77,6 @@ async fn build_backends(config: &PipelineConfig) -> Result<SinglePipelineBackend
         .audio_encoder()
         .context("could not create the native AAC encoder")?;
 
-    // The program timeline retains one latest frame, so the fixed NVDEC default provides
-    // bounded decoder headroom without scaling GPU surfaces with the network buffer duration.
-    let video_decoder = NvdecDecoder::new(NvdecConfig {
-        max_coded_width: align_up(video.width, 16),
-        max_coded_height: align_up(video.height, 16),
-        max_display_width: video.width,
-        max_display_height: video.height,
-        max_fps: video.fps,
-        ..NvdecConfig::default()
-    })
-    .context("could not initialize the NVDEC H.264 decoder")?;
-
     let gop_frames = frames_for_duration(video.gop_ms, video.fps);
     let bitrate = video
         .bitrate_kbps
@@ -104,82 +92,110 @@ async fn build_backends(config: &PipelineConfig) -> Result<SinglePipelineBackend
     })
     .context("could not initialize the NVENC H.264 encoder")?;
 
-    let (input, audio_decoder): (SingleInput, Box<dyn AudioDecoder>) = if input
-        .uri
-        .get(..7)
-        .is_some_and(|scheme| scheme.eq_ignore_ascii_case("rtsp://"))
-    {
-        let rtsp = input
-            .rtsp
-            .as_ref()
-            .ok_or_else(|| anyhow!("rtspConfigRequired: RTSP input requires inputs[0].rtsp"))?;
-        if rtsp.transport != RtspTransport::Tcp {
-            bail!(
-                "rtspUdpPendingV3_02D: the native runtime currently supports RTSP interleaved TCP only"
-            );
-        }
-        let endpoint = RtspEndpoint::from_config(&input.uri, rtsp)
-            .context("could not prepare the RTSP input")?;
-        let mut source = RtspPacketSource::connect(endpoint)
-            .await
-            .context("could not establish the RTSP DESCRIBE/SETUP/PLAY session")?;
-        if source.profile().video.codec != Some(RtspCodec::H264) {
-            let _ = source.close().await;
-            bail!(
-                "videoBridgePending: H.265 RTP depacketization is available, but the NVDEC HEVC to NVENC H.264 bridge is scheduled for V3-04"
-            );
-        }
-        let decoder = match build_rtsp_audio_decoder(
-            &aac,
-            source.profile(),
-            audio.sample_rate,
-            audio.channels,
-        ) {
-            Ok(decoder) => decoder,
-            Err(error) => {
-                let _ = source.close().await;
-                return Err(error);
+    let (input, audio_decoder, decoder_codec): (SingleInput, Box<dyn AudioDecoder>, NvdecCodec) =
+        if input
+            .uri
+            .get(..7)
+            .is_some_and(|scheme| scheme.eq_ignore_ascii_case("rtsp://"))
+        {
+            let rtsp = input
+                .rtsp
+                .as_ref()
+                .ok_or_else(|| anyhow!("rtspConfigRequired: RTSP input requires inputs[0].rtsp"))?;
+            if rtsp.transport != RtspTransport::Tcp {
+                bail!(
+                    "rtspUdpPendingV3_02D: the native runtime currently supports RTSP interleaved TCP only"
+                );
             }
+            let endpoint = RtspEndpoint::from_config(&input.uri, rtsp)
+                .context("could not prepare the RTSP input")?;
+            let mut source = RtspPacketSource::connect(endpoint)
+                .await
+                .context("could not establish the RTSP DESCRIBE/SETUP/PLAY session")?;
+            let decoder_codec = match source.profile().video.codec {
+                Some(RtspCodec::H264) => NvdecCodec::H264,
+                Some(RtspCodec::H265) => NvdecCodec::Hevc,
+                _ => {
+                    let _ = source.close().await;
+                    bail!("rtspVideoUnsupported: selected RTSP video track is not H.264 or H.265");
+                }
+            };
+            let decoder = match build_rtsp_audio_decoder(
+                &aac,
+                source.profile(),
+                audio.sample_rate,
+                audio.channels,
+            ) {
+                Ok(decoder) => decoder,
+                Err(error) => {
+                    let _ = source.close().await;
+                    return Err(error);
+                }
+            };
+            (
+                SingleInput::Packets(Box::new(source)),
+                decoder,
+                decoder_codec,
+            )
+        } else if input
+            .uri
+            .get(..7)
+            .is_some_and(|scheme| scheme.eq_ignore_ascii_case("rtmp://"))
+        {
+            let rtmp = input
+                .rtmp
+                .as_ref()
+                .ok_or_else(|| anyhow!("rtmpConfigRequired: RTMP input requires inputs[0].rtmp"))?;
+            let source = RtmpPacketSource::bind(&input.uri, rtmp)
+                .await
+                .context("could not bind the RTMP listener input")?;
+            tracing::info!(
+                address = %source.local_addr().context("could not inspect the RTMP listener input")?,
+                "RTMP listener is waiting for one publisher"
+            );
+            (
+                SingleInput::Packets(Box::new(source)),
+                Box::new(
+                    aac.audio_decoder()
+                        .context("could not create the native AAC decoder")?,
+                ),
+                NvdecCodec::H264,
+            )
+        } else {
+            let input_endpoint =
+                Endpoint::from_config(&input.uri, &input.srt, input.secret_ref.as_ref())
+                    .context("could not prepare the SRT input")?;
+            let input_transport = SrtTransport::connect(input_endpoint)
+                .await
+                .context("could not establish the initial SRT input connection")?;
+            (
+                SingleInput::Transport(Box::new(input_transport)),
+                Box::new(
+                    aac.audio_decoder()
+                        .context("could not create the native AAC decoder")?,
+                ),
+                NvdecCodec::H264,
+            )
         };
-        (SingleInput::Packets(Box::new(source)), decoder)
-    } else if input
-        .uri
-        .get(..7)
-        .is_some_and(|scheme| scheme.eq_ignore_ascii_case("rtmp://"))
-    {
-        let rtmp = input
-            .rtmp
-            .as_ref()
-            .ok_or_else(|| anyhow!("rtmpConfigRequired: RTMP input requires inputs[0].rtmp"))?;
-        let source = RtmpPacketSource::bind(&input.uri, rtmp)
-            .await
-            .context("could not bind the RTMP listener input")?;
-        tracing::info!(
-            address = %source.local_addr().context("could not inspect the RTMP listener input")?,
-            "RTMP listener is waiting for one publisher"
-        );
-        (
-            SingleInput::Packets(Box::new(source)),
-            Box::new(
-                aac.audio_decoder()
-                    .context("could not create the native AAC decoder")?,
-            ),
+
+    // The program timeline retains one latest frame, so the fixed NVDEC default provides
+    // bounded decoder headroom without scaling GPU surfaces with the network buffer duration.
+    // RTSP declares its codec in SDP; SRT/TS and traditional RTMP remain H.264-only.
+    let video_decoder = NvdecDecoder::new(NvdecConfig {
+        codec: decoder_codec,
+        max_coded_width: align_up(video.width, 16),
+        max_coded_height: align_up(video.height, 16),
+        max_display_width: video.width,
+        max_display_height: video.height,
+        max_fps: video.fps,
+        ..NvdecConfig::default()
+    })
+    .with_context(|| {
+        format!(
+            "could not initialize the NVDEC {} decoder",
+            decoder_codec.name()
         )
-    } else {
-        let input_endpoint =
-            Endpoint::from_config(&input.uri, &input.srt, input.secret_ref.as_ref())
-                .context("could not prepare the SRT input")?;
-        let input_transport = SrtTransport::connect(input_endpoint)
-            .await
-            .context("could not establish the initial SRT input connection")?;
-        (
-            SingleInput::Transport(Box::new(input_transport)),
-            Box::new(
-                aac.audio_decoder()
-                    .context("could not create the native AAC decoder")?,
-            ),
-        )
-    };
+    })?;
 
     let output = if config
         .output

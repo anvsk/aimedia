@@ -80,8 +80,10 @@ GPU，而是提前回答以下问题：
 ## 当前代码与目标边界
 
 当前已经具备 `MediaJob` 配置与显式旧配置转换、流式 MPEG-TS、SRT adapter、libxaac
-adapter、有界 Sans-I/O RTMP 会话边界、节目时钟、有界单路调度、本机控制协议、首版图编译器和实验性
-NVDEC/NVENC 帧级后端。两个视频 worker 共享
+adapter、有界 Sans-I/O RTMP 会话边界、节目时钟、有界单路调度、本机控制协议、首版
+图编译器和 NVDEC/NVENC 帧级后端。RTSP 的压缩视频边界由 SDP 决定 H.264 或 HEVC，
+两者进入同一个 8-bit NV12 GPU surface 契约；SRT/TS 和传统 RTMP 输入仍明确为 H.264。
+两个视频 worker 共享
 同一设备的 CUDA primary context，NVDEC 映射的 NV12 帧可在 GPU 内复制到持久注册的
 NVENC surface。单路生产装配已经贯通，执行计划中的生产视频 codec 节点状态为
 `adapterReady`；NVDEC 可同时租出的 surface 数由视频队列容量再加两个在途帧计算，
@@ -91,7 +93,8 @@ NVENC surface。单路生产装配已经贯通，执行计划中的生产视频 
 `ExecutionPlan`、libsrt 和 NVDEC surface 租约：每条计划边都报告容量、满载策略、
 当前水位和历史高水位，共享一个物理队列的边保持同一水位。v0.2 的互操作、网络损伤、
 两小时稳定性和 Release 已完成；v0.3 按路线图依次推进 RTSP、
-[RTMP/RTMPS 与 FLV](rfcs/0003-rtmp-flv.md) 和格式归一化，
+[RTMP/RTMPS 与 FLV](rfcs/0003-rtmp-flv.md)、
+[受限 HEVC 输入桥接](rfcs/0004-hevc-bridge.md)和格式归一化，
 多输出与通用 AI Tap 仍留在 v0.4。
 
 ## 扩展边界

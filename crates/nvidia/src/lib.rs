@@ -6,7 +6,7 @@
 mod decoder;
 mod encoder;
 
-pub use decoder::{NvdecConfig, NvdecDecoder, NvdecFormat, NvdecSurfaceLease};
+pub use decoder::{NvdecCodec, NvdecConfig, NvdecDecoder, NvdecFormat, NvdecSurfaceLease};
 pub use encoder::{NvencConfig, NvencEncoder};
 
 use std::{

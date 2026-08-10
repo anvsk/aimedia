@@ -15,8 +15,10 @@ RTSP 摄像机 -> RTP 音视频 -> access unit / PCM -> 现有节目时间线
 ```
 
 H.264 + AAC/G.711 会在 V3-02 形成真实单路闭环。H.265 在本阶段完成 SDP 识别、RTP
-重组和类型化输出，但 NVDEC HEVC 到 NVENC H.264 的闭环属于 V3-04；在此之前必须报告
-`videoBridgePending`，不能把“能收到 RTP 包”写成“支持 H.265 摄像机”。
+重组和类型化输出；NVDEC HEVC 到 NVENC H.264 的闭环由
+[RFC 0004](0004-hevc-bridge.md)继续实现。V3-04 已删除 `videoBridgePending` 并按 SDP
+选择 codec，但完整软件源门槛复验完成前仍不能把“代码已接通”写成“支持 H.265
+摄像机”。
 
 ## 为什么复用 retina
 
@@ -68,7 +70,9 @@ H.264 + AAC/G.711 会在 V3-02 形成真实单路闭环。H.265 在本阶段完�
 
 - H.264：`packetization-mode=0/1`，single NAL、STAP-A、FU-A，输出 Annex-B access unit；
   模式 2、STAP-B、MTAP 和 FU-B 明确拒绝。
-- H.265：single NAL、AP、FU，输出 Annex-B access unit；真正转 H.264 留给 V3-04。
+- H.265：single NAL、AP、FU，输出 Annex-B access unit；V3-04 只接受 Main、8-bit、
+  4:2:0、progressive、最高 1080p30，并转为 H.264 输出。Main10/HDR 与 HEVC 发布不在
+  当前范围。
 - AAC：只接受 `MPEG4-GENERIC`、AAC-LC、44.1/48kHz、单/双声道；根据 SDP
   `AudioSpecificConfig` 和 AU header 恢复 AAC 单元，进入统一音频解码/重采样阶段。
 - G.711：静态或显式 `PCMA`/`PCMU`，8kHz 单声道，直接解码为交错 `f32 PCM`。
@@ -169,8 +173,9 @@ payload 损坏必须使用稳定阶段码。可恢复的网络/会话错误只�
   每项记录型号/固件/transport/codec，模拟器不能替代真实设备证据。
 - 网络：TCP、1% 丢包、20ms 抖动、40ms RTT、会话超时、401 拒绝和输入重连；UDP
   按 V3-02D 的产品决策延后，不属于 v0.3 发布门槛。
-- GPU 闭环：H.264 + AAC/G.711 输入，1080p30 输出 SRT，PTS/DTS/PCR 单调；H.265 只验
-  depacketizer，直到 V3-04 才升级完整支持。
+- GPU 闭环：H.264 + AAC/G.711 输入，1080p30 输出 SRT，PTS/DTS/PCR 单调；H.265 的
+  SDP/runtime/NVDEC 接线由 V3-04 完成，但软件 RTSP 闭环和物理设备门槛未完成前保持
+  `foundation`/`experimental`，详见 [HEVC 验证记录](../reports/hevc.md)。
 - 稳定性：两小时运行中所有队列和重组缓存有水位，RSS/GPU 内存不持续增长；凭证不在
   日志、状态、错误或崩溃上下文出现。
 

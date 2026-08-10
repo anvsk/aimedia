@@ -638,9 +638,15 @@ impl RtspSession {
                     let track = selected_track(&self.tracks, stream_id)?;
                     let codec = track.codec.ok_or_else(|| unsupported_track(stream_id))?;
                     let pts = media_timestamp(frame.timestamp());
-                    let keyframe = frame.is_random_access_point();
+                    let reported_keyframe = frame.is_random_access_point();
                     let parameters_changed = frame.has_new_parameters();
                     let packet_loss = frame.loss();
+                    let data = Bytes::from(frame.into_data());
+                    // Some otherwise interoperable RTSP publishers do not preserve the random
+                    // access marker through their RTP relay. Recovery must still recognize the
+                    // codec-defined NAL type instead of dropping every HEVC frame forever.
+                    let keyframe =
+                        reported_keyframe || annex_b_contains_random_access(codec, data.as_ref());
                     return Ok(MediaEvent::Video(EncodedVideoFrame {
                         stream_id,
                         codec,
@@ -649,7 +655,7 @@ impl RtspSession {
                         parameters_changed,
                         packet_loss,
                         discontinuity: packet_loss > 0,
-                        data: Bytes::from(frame.into_data()),
+                        data,
                     }));
                 }
                 CodecItem::AudioFrame(frame) => {
@@ -702,6 +708,33 @@ impl RtspSession {
             })?
             .map_err(|error| RtspError::from_retina(RtspErrorStage::Teardown, error))
     }
+}
+
+fn annex_b_contains_random_access(codec: RtspCodec, data: &[u8]) -> bool {
+    let mut cursor = 0usize;
+    while cursor + 3 < data.len() {
+        let start_code_len = if data[cursor..].starts_with(&[0, 0, 0, 1]) {
+            4
+        } else if data[cursor..].starts_with(&[0, 0, 1]) {
+            3
+        } else {
+            cursor += 1;
+            continue;
+        };
+        let header = cursor + start_code_len;
+        if let Some(first_byte) = data.get(header).copied() {
+            let random_access = match codec {
+                RtspCodec::H264 => first_byte & 0x1f == 5,
+                RtspCodec::H265 => matches!((first_byte >> 1) & 0x3f, 16..=23),
+                RtspCodec::AacLc | RtspCodec::G711Alaw | RtspCodec::G711Mulaw => false,
+            };
+            if random_access {
+                return true;
+            }
+        }
+        cursor = header.saturating_add(1);
+    }
+    false
 }
 
 /// Runtime-facing RTSP source that converts depacketized protocol events into aimedia packets.

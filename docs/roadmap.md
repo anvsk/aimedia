@@ -161,8 +161,8 @@ v0.3 工程。只有 V2-11 也完成后，总览才把 v0.2 标记为完全完�
   - [x] V3-02E：H.265 RTP 重组、明确 bridge pending 与 V3-04 handoff。
     证据：PR [#30](https://github.com/anvsk/aimedia/pull/30)，两个 RFC 7798 FU RTP 包重组为
     单个 Annex-B IDR access unit 并以 `CodecId::H265` 交给公共媒体边界；native GPU
-    运行前仍返回稳定 `videoBridgePending`，Linux workspace 45 项测试与严格 Clippy
-    通过。
+    在该 PR 时返回稳定 `videoBridgePending`，Linux workspace 45 项测试与严格 Clippy
+    通过；该临时错误已由后续 V3-04B 删除。
   - [ ] V3-02F：外部设备、网络损伤、两小时 soak 和支持矩阵升级。
     - [x] V3-02F1：MediaMTX 1.20.0 + FFmpeg 发布端的外部软件互操作、GPU 闭环、
       发布源断开/404 重试/恢复，以及 40ms RTT、20ms 抖动、1% 丢包短门禁。
@@ -232,7 +232,22 @@ v0.3 工程。只有 V2-11 也完成后，总览才把 v0.2 标记为完全完�
     - [ ] V3-03F4：1080p30 两小时 GPU soak、资源趋势和原始证据附件。2026-08-06 的
       一次运行在 2,911 秒按用户要求主动停止；容器已清理，部分样本已记录，但该门槛
       仍未完成。
-- [ ] **V3-04 HEVC Bridge**：H.265 输入转 H.264 输出。
+- [ ] **V3-04 HEVC Bridge**：按 [RFC 0004](rfcs/0004-hevc-bridge.md) 将中国市场常见的
+  RTSP H.265 Main 输入转为平台通用 H.264/AAC 输出；不增加 H.265 输出或 Enhanced RTMP。
+  - [x] V3-04A：可配置 H.264/HEVC 的 NVDEC parser、capability 检查和共享 NV12 surface
+    契约；只接受 progressive 8-bit 4:2:0、最高 1080p30。SDK 13.0 Linux release build
+    通过，RTX 5060 Laptop 已把单个 HEVC IRAP 解成真实 NV12 surface。
+  - [x] V3-04B：按 RTSP SDP 选择 NVDEC codec，删除 `videoBridgePending`；执行图将 RTSP
+    视频边界表达为运行时确定的 `compressedVideo`，SRT/RTMP 继续明确为 H.264。RTSP
+    adapter 还会从 Annex-B NAL type 兜底识别 H.264 IDR/HEVC IRAP，避免 relay 丢失
+    random-access 标记后永久卡在恢复闸门。
+  - [ ] V3-04C：短时真实 GPU 链路 `RTSP/HEVC -> NVDEC -> NVENC H.264 -> SRT/RTMP`，
+    验证输出 codec、首帧 IDR、单调时间戳、断线后等待新 IRAP 和 surface 上限。两次
+    软件源门槛分别发现并修复 random-access 标记丢失和 NVDEC 空 display queue 误判；
+    修复后的完整门槛按用户要求未继续重跑，证据见 [HEVC 验证记录](reports/hevc.md)。
+  - [x] V3-04D：支持矩阵、RFC、快速入门和验证记录已按真实状态更新；闭环重验前标记
+    `foundation`，之后即使软件发送端通过仍保持 RTSP `experimental`，不能代替
+    V3-02F2 的物理摄像机认证。
 - [ ] **V3-05 格式归一化**：720p/1080p、25/30/50/60fps、横竖屏、44.1/48kHz
   和单/双声道。
 - [ ] **V3-06 平台互操作**：在 V3-03F3 的“两平台最低门槛”之后补齐腾讯云、阿里云、
