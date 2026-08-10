@@ -65,6 +65,7 @@ pub enum MemoryDomain {
 pub enum MediaType {
     MpegTs,
     RtmpMessage,
+    CompressedVideo,
     H264AccessUnit,
     AacAdts,
     CompressedAudio,
@@ -272,7 +273,11 @@ pub fn compile(config: &PipelineConfig) -> Result<ExecutionPlan, CompileError> {
                 MemoryDomain::NvidiaDevice,
                 true,
                 NodeStatus::AdapterReady,
-                "NVDEC H.264 to leased NV12 surface".to_owned(),
+                if rtsp {
+                    "NVDEC H.264/HEVC to leased 8-bit NV12 surface".to_owned()
+                } else {
+                    "NVDEC H.264 to leased NV12 surface".to_owned()
+                },
             ),
             node(
                 &audio_decode,
@@ -294,7 +299,11 @@ pub fn compile(config: &PipelineConfig) -> Result<ExecutionPlan, CompileError> {
                 edge(
                     &source,
                     &video_decode,
-                    MediaType::H264AccessUnit,
+                    if rtsp {
+                        MediaType::CompressedVideo
+                    } else {
+                        MediaType::H264AccessUnit
+                    },
                     MemoryDomain::Host,
                     ClockDomain::Source,
                     capacities.video_frames,
@@ -713,7 +722,7 @@ mod tests {
         assert_eq!(
             plan.edge("input.0", "video.decode.0")
                 .map(|edge| edge.contract.media),
-            Some(MediaType::H264AccessUnit)
+            Some(MediaType::CompressedVideo)
         );
         assert_eq!(
             plan.edge("input.0", "audio.decode.0")

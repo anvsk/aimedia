@@ -25,16 +25,17 @@
 | SRT caller/listener | supported | libsrt 1.5.5 adapter、epoll、指数退避和断开后 native 重连已测；caller/listener 四种组合、断流恢复、1% 丢包/20ms 抖动/40ms RTT 及两小时长稳已验证 |
 | RTMP listener input + FLV | experimental | 明文 `rtmp://` listener、H.264 Annex-B/AVCC 与 AAC ADTS/raw 转换已接入单路 `aimedia run`。FFmpeg 8.1.2 -> aimedia -> MediaMTX 的 180 秒门禁和 420 秒故障回归已通过；后者输入/输出重连严格为计划内 1/1。OBS 30.0.2.1 发布链也已由 ffprobe 验证 H.264/AAC、首帧 keyframe 和单调时间戳。真实硬件编码器、真实平台和两小时 soak 未完成 |
 | RTMP/RTMPS publisher output | experimental | 编码后的 H.264 Annex-B/AAC ADTS 直接进入有界 publisher；RTMPS 使用 rustls 与公开 WebPKI 信任根校验证书和主机名。MediaMTX 回归验证了输出断线、无历史积压、重连后配置/IDR、节目 PTS 连续和 p95 141ms；OBS Media Source 已实际渲染 1280x720 输出。stream key 与签名 query 分别使用 secret reference，`publish-check` 和 `tools/platform.ps1` 可输出脱敏的连接阶段报告。当前网络下 YouTube/Twitch 均在 RTMP Handshake 失败，尚无平台 accepted 媒体证据；至少两个真实平台成功接收及两小时 soak 未完成，不能标记为 supported |
-| RTSP/RTP input | experimental | `aimedia run` 已接 TCP interleaved 单路数据面：H.264/AAC-LC/G.711 直接进入有界 codec 队列，G.711 8kHz 单声道归一到 48kHz 双声道；MediaMTX 1.20.0 + FFmpeg 发布端已通过 180 秒 GPU 闭环、发布源 404 重连和 40ms RTT/20ms 抖动/1% 丢包短门禁，p95 90ms 且输出时间戳零回退。H.265 可重组为 Annex-B access unit，但 HEVC bridge 仍返回 `videoBridgePending`；UDP、非 48kHz 双声道 AAC、物理摄像机认证和两小时长稳未完成，不代表 GB28181 支持 |
+| RTSP/RTP input | experimental | `aimedia run` 已接 TCP interleaved 单路数据面：H.264/AAC-LC/G.711 直接进入有界 codec 队列，G.711 8kHz 单声道归一到 48kHz 双声道；MediaMTX 1.20.0 + FFmpeg 发布端已通过 180 秒 GPU 闭环、发布源 404 重连和 40ms RTT/20ms 抖动/1% 丢包短门禁，p95 90ms 且输出时间戳零回退。H.265 SDP/RTP 已接到 codec-selectable NVDEC，`videoBridgePending` 已删除，但修复后的完整 HEVC 软件源门槛尚未重跑，因此 H.265 子能力仍是 `foundation`；UDP、非 48kHz 双声道 AAC、物理摄像机认证和两小时长稳未完成，不代表 GB28181 支持 |
 | 多输出与 Analyzer Tap | planned | v0.4；每个支路独立有界并与媒体主链隔离 |
 | WHIP output | planned | v0.6 以后按真实服务采用证据评估；H.264/Opus |
-| NVDEC | supported | H.264 parser callback、NV12 map/unmap、代际 surface lease、discontinuity/IDR 闸门已实现；RTX 5060 Laptop、577.12 驱动完成两小时真实解码，零丢帧、surface 高水位 3/4 |
+| NVDEC H.264 | supported | H.264 parser callback、NV12 map/unmap、代际 surface lease、discontinuity/IDR 闸门已实现；RTX 5060 Laptop、577.12 驱动完成两小时真实解码，零丢帧、surface 高水位 3/4 |
+| NVDEC HEVC input bridge | foundation | HEVC Main 8-bit 4:2:0 使用同一代际 NV12 surface 契约；SDK 13.0 release build 和单个 1080p IRAP 的真实 RTX 5060 解码已通过。RTSP 软件源门槛发现并修复 random-access 标记与空 display queue 两个边界，修复后的完整 H.264 输出链尚未重跑；Main10/HDR/隔行/4:2:2/4:4:4 明确拒绝 |
 | NVENC | supported | H.264 Main、CBR、无 B 帧、1 秒 GOP、持久注册 NV12 surface、强制 IDR/SPS/PPS 和 EOS 已实现；同机两小时输出 216,423 个视频 packet，PTS=DTS 且零倒退 |
 | AAC-LC via libxaac | supported | 48kHz 双声道、128kbps ADTS 帧级 encode/decode、core adapter、flush 和固定 cadence 已测；两小时输出 338,163 个音频 packet，PTS/DTS 零倒退 |
 | Silero VAD / 视觉 ONNX | planned | ONNX Runtime adapter |
 | REST/WebSocket 作业控制面 | planned | v0.5 Media Job Service |
 | WHEP、HTTP-FLV/HLS viewer output | out-of-scope | 当前产品不建设观众侧源站或 CDN |
-| HEVC、AV1、文件 seek | out-of-scope | 后续阶段 |
+| HEVC 输出、AV1、文件 seek | out-of-scope | V3-04 只做受限 HEVC 输入到 H.264 输出；HEVC 发布仍在后续阶段 |
 | FFmpeg CLI 全兼容 | out-of-scope | 只逐项增加已验证翻译 |
 
 后续状态升级必须记录 producer、consumer、平台或设备、GPU/驱动、连续运行时长和

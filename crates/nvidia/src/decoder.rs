@@ -1,13 +1,38 @@
 use std::any::Any;
 
-use aimedia_core::backend::SurfaceLease;
 #[cfg(not(feature = "video-codec-sdk"))]
 use aimedia_core::backend::{BackendError, VideoDecoder};
+use aimedia_core::backend::{CodecId, SurfaceLease};
 #[cfg(not(feature = "video-codec-sdk"))]
 use async_trait::async_trait;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NvdecCodec {
+    H264,
+    Hevc,
+}
+
+impl NvdecCodec {
+    #[must_use]
+    pub const fn packet_codec(self) -> CodecId {
+        match self {
+            Self::H264 => CodecId::H264,
+            Self::Hevc => CodecId::H265,
+        }
+    }
+
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::H264 => "H.264",
+            Self::Hevc => "HEVC",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct NvdecConfig {
+    pub codec: NvdecCodec,
     pub device: u32,
     pub max_coded_width: u32,
     pub max_coded_height: u32,
@@ -21,6 +46,7 @@ pub struct NvdecConfig {
 impl Default for NvdecConfig {
     fn default() -> Self {
         Self {
+            codec: NvdecCodec::H264,
             device: 0,
             max_coded_width: 1_920,
             max_coded_height: 1_088,
@@ -170,14 +196,14 @@ mod native {
     use aimedia_core::{
         GpuSurfaceRuntimeStats, Timestamp,
         backend::{
-            BackendError, CodecId, GpuSurfaceObserver, MediaPacket, MemoryDomain, PixelFormat,
-            VideoDecoder, VideoFrame, VideoSurface,
+            BackendError, GpuSurfaceObserver, MediaPacket, MemoryDomain, PixelFormat, VideoDecoder,
+            VideoFrame, VideoSurface,
         },
     };
     use async_trait::async_trait;
     use tokio::sync::oneshot;
 
-    use super::{NvdecConfig, NvdecFormat, NvdecSurfaceLease};
+    use super::{NvdecCodec, NvdecConfig, NvdecFormat, NvdecSurfaceLease};
     use crate::{NvidiaError, NvidiaLibraries, sdk_ffi};
 
     const CLOCK_RATE: u32 = 90_000;
@@ -244,6 +270,7 @@ mod native {
         commands: SyncSender<Command>,
         worker: Option<thread::JoinHandle<()>>,
         surfaces: Arc<SurfaceMetrics>,
+        codec: NvdecCodec,
         waiting_for_idr: bool,
         reset_pending: bool,
     }
@@ -288,6 +315,7 @@ mod native {
         fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             formatter
                 .debug_struct("NvdecDecoder")
+                .field("codec", &self.codec)
                 .field("waitingForIdr", &self.waiting_for_idr)
                 .field("resetPending", &self.reset_pending)
                 .field("surfaces", &self.surfaces.stats())
@@ -345,6 +373,7 @@ mod native {
                 commands,
                 worker: Some(worker),
                 surfaces,
+                codec: config.codec,
                 waiting_for_idr: true,
                 reset_pending: false,
             })
@@ -385,16 +414,20 @@ mod native {
             &mut self,
             mut packet: MediaPacket,
         ) -> Result<Vec<VideoFrame>, BackendError> {
-            if packet.codec != CodecId::H264 {
+            let expected_codec = self.codec.packet_codec();
+            if packet.codec != expected_codec {
                 return Err(BackendError::Unsupported(format!(
-                    "NVDEC expects H.264, got {:?}",
-                    packet.codec
+                    "NVDEC {} decoder expects {:?}, got {:?}",
+                    self.codec.name(),
+                    expected_codec,
+                    packet.codec,
                 )));
             }
             if !has_annex_b_start_code(&packet.data) {
-                return Err(BackendError::Unsupported(
-                    "NVDEC expects an H.264 Annex-B access unit".to_owned(),
-                ));
+                return Err(BackendError::Unsupported(format!(
+                    "NVDEC expects an {} Annex-B access unit",
+                    self.codec.name()
+                )));
             }
             if packet.discontinuity {
                 self.waiting_for_idr = true;
@@ -589,7 +622,10 @@ mod native {
                 | sdk_ffi::CUvideopacketflags_CUVID_PKT_ENDOFPICTURE)
                 .into();
             source_packet.payload_size = packet.data.len().try_into().map_err(|_| {
-                BackendError::Unsupported("H.264 access unit is too large".to_owned())
+                BackendError::Unsupported(format!(
+                    "{} access unit is too large",
+                    self.config.codec.name()
+                ))
             })?;
             source_packet.payload = packet.data.as_ptr();
             source_packet.timestamp = to_90khz(packet.pts);
@@ -628,11 +664,16 @@ mod native {
             let generation = self.current.as_mut().ok_or_else(|| {
                 BackendError::Processing("NVDEC generation is unavailable".to_owned())
             })?;
+            let displays = std::mem::take(&mut generation.callback.display_queue);
+            // Parameter-only access units and parser warm-up packets legitimately produce no
+            // display callback before the sequence callback has established a format.
+            if displays.is_empty() {
+                return Ok(Vec::new());
+            }
             let format = generation.callback.format.ok_or_else(|| {
                 BackendError::Processing("NVDEC parser produced a frame before format".to_owned())
             })?;
             let decoder = generation.callback.decoder;
-            let displays = std::mem::take(&mut generation.callback.display_queue);
             let mut frames = Vec::with_capacity(displays.len());
             for display in displays {
                 let mut process = zeroed::<sdk_ffi::CUVIDPROCPARAMS>();
@@ -696,7 +737,7 @@ mod native {
                 failure: None,
             });
             let mut params = zeroed::<sdk_ffi::CUVIDPARSERPARAMS>();
-            params.CodecType = sdk_ffi::cudaVideoCodec_enum_cudaVideoCodec_H264;
+            params.CodecType = sdk_codec(self.config.codec);
             params.ulMaxNumDecodeSurfaces = 1;
             params.ulClockRate = CLOCK_RATE;
             params.ulErrorThreshold = 0;
@@ -836,7 +877,7 @@ mod native {
                 return Ok(i32::try_from(parsed.decode_surfaces).unwrap_or(i32::MAX));
             }
             let mut caps = zeroed::<sdk_ffi::CUVIDDECODECAPS>();
-            caps.eCodecType = sdk_ffi::cudaVideoCodec_enum_cudaVideoCodec_H264;
+            caps.eCodecType = sdk_codec(self.config.codec);
             caps.eChromaFormat = sdk_ffi::cudaVideoChromaFormat_enum_cudaVideoChromaFormat_420;
             caps.nBitDepthMinus8 = 0;
             // SAFETY: caps points to a valid zeroed SDK structure.
@@ -848,7 +889,7 @@ mod native {
             create.ulWidth = parsed.coded_width.into();
             create.ulHeight = parsed.coded_height.into();
             create.ulNumDecodeSurfaces = parsed.decode_surfaces.into();
-            create.CodecType = sdk_ffi::cudaVideoCodec_enum_cudaVideoCodec_H264;
+            create.CodecType = sdk_codec(self.config.codec);
             create.ChromaFormat = sdk_ffi::cudaVideoChromaFormat_enum_cudaVideoChromaFormat_420;
             create.ulCreationFlags =
                 sdk_ffi::cudaVideoCreateFlags_enum_cudaVideoCreate_PreferCUVID.into();
@@ -964,10 +1005,11 @@ mod native {
         format: &sdk_ffi::CUVIDEOFORMAT,
         config: NvdecConfig,
     ) -> Result<NvdecFormat, BackendError> {
-        if format.codec != sdk_ffi::cudaVideoCodec_enum_cudaVideoCodec_H264 {
-            return Err(BackendError::Unsupported(
-                "NVDEC alpha accepts only H.264".to_owned(),
-            ));
+        if format.codec != sdk_codec(config.codec) {
+            return Err(BackendError::Unsupported(format!(
+                "NVDEC {} decoder received a different codec",
+                config.codec.name()
+            )));
         }
         if format.chroma_format != sdk_ffi::cudaVideoChromaFormat_enum_cudaVideoChromaFormat_420 {
             return Err(BackendError::Unsupported(
@@ -1046,8 +1088,8 @@ mod native {
             || caps.nOutputFormatMask & nv12_bit == 0
         {
             return Err(BackendError::Unsupported(format!(
-                "GPU does not support H.264 8-bit 4:2:0 NV12 decode at {}x{}",
-                format.coded_width, format.coded_height
+                "GPU does not support the requested 8-bit 4:2:0 NV12 decode at {}x{}",
+                format.coded_width, format.coded_height,
             )));
         }
         Ok(())
@@ -1071,6 +1113,13 @@ mod native {
 
     fn has_annex_b_start_code(data: &[u8]) -> bool {
         data.starts_with(&[0, 0, 1]) || data.starts_with(&[0, 0, 0, 1])
+    }
+
+    const fn sdk_codec(codec: NvdecCodec) -> sdk_ffi::cudaVideoCodec {
+        match codec {
+            NvdecCodec::H264 => sdk_ffi::cudaVideoCodec_enum_cudaVideoCodec_H264,
+            NvdecCodec::Hevc => sdk_ffi::cudaVideoCodec_enum_cudaVideoCodec_HEVC,
+        }
     }
 
     fn positive_extent(start: i32, end: i32) -> Result<u32, BackendError> {
@@ -1223,8 +1272,8 @@ mod native {
         };
 
         use super::{
-            NvdecConfig, NvdecDecoder, NvdecFormat, NvdecSurfaceLease, has_annex_b_start_code,
-            validate_format_policy,
+            NvdecCodec, NvdecConfig, NvdecDecoder, NvdecFormat, NvdecSurfaceLease,
+            has_annex_b_start_code, validate_format_policy,
         };
 
         #[test]
@@ -1300,6 +1349,43 @@ mod native {
             drop(frames);
             drop(resumed_frames);
             decoder.shutdown().await.expect("shutdown NVDEC");
+        }
+
+        #[tokio::test(flavor = "current_thread")]
+        #[ignore = "requires an NVIDIA GPU and AIMEDIA_NVDEC_HEVC_FIXTURE"]
+        async fn gpu_decodes_hevc_fixture_to_the_shared_nv12_surface_contract() {
+            let fixture = std::env::var("AIMEDIA_NVDEC_HEVC_FIXTURE")
+                .expect("AIMEDIA_NVDEC_HEVC_FIXTURE must point to one Annex-B IRAP access unit");
+            let data = std::fs::read(fixture).expect("read HEVC fixture");
+            let mut decoder = NvdecDecoder::new(NvdecConfig {
+                codec: NvdecCodec::Hevc,
+                ..NvdecConfig::default()
+            })
+            .expect("start HEVC NVDEC");
+            let packet = MediaPacket {
+                stream_id: 0,
+                codec: CodecId::H265,
+                pts: Timestamp::new(0, 90_000),
+                dts: Some(Timestamp::new(0, 90_000)),
+                duration: Some(Timestamp::new(3_000, 90_000)),
+                keyframe: true,
+                discontinuity: false,
+                data: data.into(),
+            };
+            let mut frames = decoder.decode(packet).await.expect("decode HEVC fixture");
+            frames.extend(decoder.flush().await.expect("flush HEVC decoder"));
+            assert_eq!(frames.len(), 1);
+            let frame = &frames[0];
+            assert_eq!(frame.format, PixelFormat::Nv12);
+            let lease = frame
+                .surface
+                .downcast_ref::<NvdecSurfaceLease>()
+                .expect("typed NVDEC surface lease");
+            assert_ne!(lease.device_ptr(), 0);
+            assert!(lease.pitch() >= frame.width);
+
+            drop(frames);
+            decoder.shutdown().await.expect("shutdown HEVC NVDEC");
         }
     }
 }

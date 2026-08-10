@@ -30,8 +30,9 @@
 - `aimedia-graph`：把现有配置编译为类型化、有界的执行计划；
 - 流式 MPEG-TS demux/mux、PSI/PES、PTS 回绕、PAT/PMT/PCR；
 - libsrt caller/listener adapter、重连状态和敏感信息校验；
-- `retina 0.4.19` 后的 RTSP/RTP 会话边界，以及 TCP interleaved H.264/AAC/G.711
-  到单路 native runtime 的直接有界接线；
+- `retina 0.4.19` 后的 RTSP/RTP 会话边界，以及 TCP interleaved H.264/H.265、
+  AAC/G.711 到单路 native runtime 的直接有界接线；RTSP SDP 决定 H.264 或 HEVC
+  NVDEC，二者复用 8-bit NV12 surface 契约；
 - 短目录 `crates/rtmp` 中的 RTMP listener、RTMP/RTMPS publisher、FLV AVC/AAC 转换和
   单路 native runtime 接线；任一方向重连后都丢弃历史数据、重新等待配置与 IDR，
   RTMP 输入/输出运行指标进入 `state`；
@@ -49,8 +50,10 @@
 
 - 多输出和 Analyzer Tap 数据面。通用 `MediaJob` v2 配置已经取代旧导播配置；旧文件
   只能通过显式转换命令迁移，不会在运行时静默兼容。
-- RTSP TCP 已通过 MediaMTX 外部软件短门禁；物理摄像机认证、两小时长稳、UDP 和
-  H.265 bridge 仍未完成，因此保持 `experimental`。
+- RTSP H.264 TCP 已通过 MediaMTX 外部软件短门禁；受限 H.265 Main 输入桥接已完成
+  SDK release build、真实 GPU 单帧解码和 runtime 接线，但修复后的完整 RTSP 软件源
+  门槛尚未重跑。物理摄像机认证、两小时长稳和 UDP 也未完成，因此 RTSP 保持
+  `experimental`，H.265 子能力保持 `foundation`。
 - RTMP listener 与 publisher 已通过 FFmpeg、OBS 和 MediaMTX 外部门禁，覆盖实际渲染、
   输入/输出重连、网络损伤、IDR 恢复和节目 PTS 连续；RTMPS 使用公开 WebPKI 信任根，
   不提供跳过校验开关。平台 stream key 和腾讯/阿里/Twitch 等签名 query 可分别通过
@@ -125,6 +128,7 @@ crates/
 - [RFC 0001：意图驱动的实时媒体运行时](docs/rfcs/0001-intent-media-runtime.md)
 - [RFC 0002：主流摄像机 RTSP/RTP 输入](docs/rfcs/0002-rtsp-input.md)
 - [RFC 0003：RTMP/RTMPS 与 FLV 边界](docs/rfcs/0003-rtmp-flv.md)
+- [RFC 0004：受限 HEVC 输入到 H.264 输出桥接](docs/rfcs/0004-hevc-bridge.md)
 - [架构说明](docs/architecture.md)
 - [执行路线图与完成状态](docs/roadmap.md)
 - [用户故事](docs/user-stories.md)
@@ -134,6 +138,7 @@ crates/
 - [市场支持策略](docs/market-support.md)
 - [支持矩阵](docs/support-matrix.md)
 - [RTSP 互操作报告](docs/reports/rtsp.md)
+- [HEVC 输入桥接验证记录](docs/reports/hevc.md)
 - [平台发布门槛报告](docs/reports/platforms.md)
 - [v0.2 Release Notes](docs/releases/v0.2.md)
 
