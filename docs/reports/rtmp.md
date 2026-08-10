@@ -11,6 +11,8 @@
 一次计划内重连。2026-08-10 又完成 OBS 作为 publisher 和 consumer 的双向门槛，
 包含实际渲染与 ffprobe。它证明 FFmpeg、OBS、MediaMTX 和明文 RTMP 的短时互操作及
 故障恢复，不替代 RTMPS 真实平台或两小时稳定性验证，因此状态仍是 `experimental`。
+真实平台前置连接、鉴权配置和当前网络诊断单独记录在
+[平台发布门槛报告](platforms.md)。
 
 ## 可复现环境
 

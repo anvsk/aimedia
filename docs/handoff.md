@@ -2,9 +2,9 @@
 
 更新时间：2026-08-10
 
-暂停点：V3-03F2 的 OBS RTMP 发布、接收和实际渲染门槛完成后
+暂停点：V3-03F3a/F3b 的平台安全凭证与前置发布门槛完成后；真实平台 accepted 尚未完成
 
-Git 基线：`main` 的 `6b86a7b`，交付分支 `codex/feat/rtmp-obs`
+Git 基线：`main` 的 `afcda07`，交付分支 `codex/feat/platform-gate`
 
 ## 先读结论
 
@@ -27,6 +27,7 @@ Git 基线：`main` 的 `6b86a7b`，交付分支 `codex/feat/rtmp-obs`
 | RTMP FFmpeg -> aimedia -> MediaMTX 180/420 秒故障门禁 | 本交付 | PR #38；`docs/reports/rtmp.md` |
 | RTMP publisher ACK 竞态修复 | 本交付 | PR #38；`anvsk/rtmp-rs@00e97a6` |
 | OBS RTMP publisher/consumer 与实际渲染 | 本交付 | PR #39；`tools/interop.ps1 -Suite rtmp-obs`；`docs/reports/rtmp.md` |
+| 平台签名 query、`publish-check` 与脱敏平台报告 | 当前交付 | `tools/platform.ps1`；`docs/reports/platforms.md` |
 | RTMP 真实平台、完整两小时 soak | 未完成 | 保持 `experimental` |
 | v0.4 多输出与 AI Tap | 未开始 | 暂停期间不要开发 |
 
@@ -40,6 +41,15 @@ V3-03F2 使用 OBS 30.0.2.1 完成两条 20 秒独立链路。OBS publisher 经 
 为 keyframe，PTS/DTS 单调。反向链路由 OBS Media Source 实际渲染 1280x720 彩条，
 PNG 解码后检测到 13 种颜色；OBS、aimedia 均正常退出。运行镜像再次确认没有
 FFmpeg/ffprobe 或 `libav*`。
+
+V3-03F3a/F3b 解决了此前平台签名无法安全配置的问题：stream key 使用
+`streamNameRef`，腾讯云 `txSecret/txTime`、阿里云 `auth_key` 和 Twitch
+`bandwidthtest=true` 使用独立的 `publishQueryRef`，二者都不会进入 URI、Debug 或报告。
+`aimedia publish-check` 可在不启动输入、codec 或 GPU 的情况下验证 publish；
+`tools/platform.ps1` 对成功和失败都生成阶段化脱敏报告。MediaMTX 1.20.0 accepted 路径
+已通过。当前网络把 YouTube/Twitch ingest 分别映射到 `198.18.0.116/117`，aimedia 与
+FFmpeg 均在 RTMP Handshake 失败，因此不计作真实平台通过。详见
+`docs/reports/platforms.md`。
 
 两小时测试使用相同镜像启动，按用户要求在 2,911 秒主动停止，容器与网络已清理。停止
 前输入/输出仍连接，重连 1/1，p95 72ms，RSS 约 229 MiB，隔离设备显存 180 MiB；因为
@@ -83,11 +93,16 @@ FFmpeg 和 MediaMTX 只属于测试端，不进入运行镜像。
 
 按以下顺序关闭门槛：
 
-1. 用户提供测试直播账号或临时 stream key 后，验证至少两个 endpoint。建议一条国内
-   通用 RTMP/RTMPS、一条海外 RTMPS；凭证只通过环境变量或挂载文件传入，日志不得输出。
-2. 如果上述互操作带来代码变更，先重新跑 420 秒 ACK 与故障回归；输入/输出重连必须
+1. 先确认网络不再把目标 ingest 映射到 `198.18.0.0/15`，再使用测试频道或临时授权验证
+   至少两个 endpoint。建议一条国内通用 RTMP/RTMPS、一条海外 RTMPS；不得把真实
+   stream key 或签名 query 写入命令历史、YAML、日志或报告。
+2. 先用 `aimedia publish-check` 或 `tools/platform.ps1 -HandshakeOnly` 得到 accepted，
+   再使用默认媒体模式持续发送不少于 30 秒，并保存平台控制台健康状态。失败若仍在
+   Handshake，不能写成平台鉴权拒绝；只有 `PublishRejected during Command` 才属于
+   publish 授权/流可用性阶段。
+3. 如果上述互操作带来代码变更，再决定是否运行 420 秒 ACK 与故障回归；输入/输出重连必须
    仍严格等于计划次数。
-3. 用户允许继续长稳测试后，重新跑满 1080p30 两小时门禁并保存 summary/samples 到
+4. 用户允许继续长稳测试后，重新跑满 1080p30 两小时门禁并保存 summary/samples 到
    GitHub Release。不要把本次 2,911 秒的中止运行拼接或折算为通过：
 
 ```powershell
@@ -104,7 +119,20 @@ pwsh ./tools/rtmp.ps1 `
   -SampleIntervalSeconds 30
 ```
 
-4. 全部通过后才勾选 V3-03F、更新支持矩阵并考虑 v0.3 Release。
+5. 全部通过后才勾选 V3-03F、更新支持矩阵并考虑 v0.3 Release。
+
+平台前置门槛示例（环境变量只在当前进程提供，不把值写进 YAML）：
+
+```powershell
+$env:AIMEDIA_PLATFORM_STREAM_NAME = '<temporary-stream-key>'
+$env:AIMEDIA_PLATFORM_QUERY = 'bandwidthtest=true'
+pwsh ./tools/platform.ps1 `
+  -EngineImage aimedia:gpu `
+  -Platform twitch `
+  -Endpoint rtmp://<official-ingest>/app `
+  -PublishQueryEnv AIMEDIA_PLATFORM_QUERY `
+  -HandshakeOnly
+```
 
 本轮新增的 ACK 修复已经完成，无需下次重新定位：
 
@@ -152,6 +180,8 @@ keepalive timer 可能饥饿，MediaMTX 最终按 read timeout 关闭 reader；�
   x86_64 才是产品目标，完整验证统一在 Docker/Linux 运行。RTMP crate 可在 Windows
   单独测试。
 - 当前 RTMP listener 只接受明文 `rtmp://`；RTMPS 仅用于 publisher 输出。
+- 当前平台报告只证明门槛成功/失败分层；YouTube/Twitch 的本轮结果受本机代理路径阻断，
+  没有真实 accepted 媒体证据。
 - RTMP 只支持传统 FLV AVC/AAC，不支持 Enhanced RTMP、HEVC、AV1、观众播放或 GOP cache。
 - RTSP 只支持 TCP interleaved；UDP、H.265 到 H.264 bridge 尚未完成。
 - 不要把 `foundation`、内部回环或 180 秒短门禁写成生产支持。
@@ -187,6 +217,7 @@ pwsh ./tools/rtmp.ps1 -EngineImage aimedia:rtmp-next -DurationSeconds 420 `
 
 ## 暂停原则
 
-本交付合并后按用户要求停止开发，不创建 v0.4 分支，不继续后台测试，也不发布“RTMP
-已 supported”的社区广告。下次恢复时依次完成 V3-03F3 真实平台和 V3-03F4 完整
-两小时长稳；优先补外部证据，不继续增加新协议或格式。
+本交付合并后可以按用户要求暂停，不创建 v0.4 分支，不继续后台长稳测试，也不发布
+“RTMP 已 supported”的社区广告。下次恢复先完成 V3-03F3c 的两个真实平台 accepted
+媒体证据；V3-03F4 两小时长稳必须等用户重新允许。优先补外部证据，不继续增加新协议
+或格式。

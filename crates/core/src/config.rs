@@ -753,6 +753,16 @@ fn validate_rtmp(
         &format!("{path}.streamNameRef"),
         errors,
     );
+    validate_secret_ref(
+        config.publish_query_ref.as_ref(),
+        &format!("{path}.publishQueryRef"),
+        errors,
+    );
+    if expected_mode != RtmpMode::Publish && config.publish_query_ref.is_some() {
+        errors.push(format!(
+            "{path}.publishQueryRef is only valid for an RTMP publisher output"
+        ));
+    }
 
     match (&config.stream_name, &config.stream_name_ref) {
         (Some(name), None) => {
@@ -1144,6 +1154,11 @@ pub struct RtmpConfig {
     pub stream_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stream_name_ref: Option<SecretRef>,
+    /// Optional query component appended to the publish stream name after secret resolution.
+    ///
+    /// This is reference-only because signed cloud queries commonly contain reusable tokens.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub publish_query_ref: Option<SecretRef>,
     #[serde(default = "default_connect_timeout")]
     pub connect_timeout_ms: u64,
     #[serde(default = "default_rtmp_handshake_timeout")]
@@ -1177,6 +1192,37 @@ impl RtmpConfig {
         }
 
         Ok(value)
+    }
+
+    pub fn resolve_publish_stream_name(&self) -> Result<String, SecretError> {
+        let stream_name = self.resolve_stream_name()?;
+        let Some(reference) = &self.publish_query_ref else {
+            return Ok(stream_name);
+        };
+        let query = reference.resolve()?;
+        if query.is_empty() {
+            return Err(SecretError::InvalidValue("publish query is empty"));
+        }
+        if query.len() > 512 {
+            return Err(SecretError::InvalidValue("publish query exceeds 512 bytes"));
+        }
+        if !query.is_ascii()
+            || query.starts_with('?')
+            || query.contains(['?', '#', '\r', '\n'])
+            || query
+                .bytes()
+                .any(|byte| byte.is_ascii_control() || byte == b' ')
+        {
+            return Err(SecretError::InvalidValue(
+                "publish query must be printable ASCII without a leading question mark, fragment, nested query, space, or line break",
+            ));
+        }
+        if stream_name.len() + 1 + query.len() > 1_024 {
+            return Err(SecretError::InvalidValue(
+                "resolved RTMP stream name and publish query exceed 1024 bytes",
+            ));
+        }
+        Ok(format!("{stream_name}?{query}"))
     }
 }
 

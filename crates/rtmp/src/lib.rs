@@ -43,6 +43,7 @@ pub enum RtmpErrorCode {
     MessageTooLarge,
     ResourceLimit,
     Protocol,
+    PublishRejected,
     Io,
     Timeout,
 }
@@ -418,12 +419,12 @@ impl PublishSession {
             ));
         }
         let endpoint = parse_endpoint(uri, true)?;
-        let stream_name = config.resolve_stream_name().map_err(|_| {
+        let stream_name = config.resolve_publish_stream_name().map_err(|_| {
             RtmpError::new(
                 RtmpErrorCode::InvalidSecret,
                 RtmpErrorStage::Configuration,
                 false,
-                "RTMP streamNameRef could not be resolved to a valid value",
+                "RTMP streamNameRef or publishQueryRef could not be resolved to a valid value",
             )
         })?;
         Self::new(uri, stream_name, config.max_message_bytes as usize).map(|mut session| {
@@ -484,6 +485,7 @@ impl PublishSession {
             return Err(closed_session_error());
         }
         self.guard.inspect(bytes)?;
+        let mut publish_pending = self.connection.state() == RtmpConnectionState::PublishPending;
         self.connection
             .feed_recv_buf(bytes)
             .map_err(|error| RtmpError::protocol(self.current_stage(), error))?;
@@ -501,13 +503,27 @@ impl PublishSession {
             }
             match event {
                 RtmpConnectionEvent::StateChanged(state) => {
+                    if state == RtmpConnectionState::PublishPending {
+                        publish_pending = true;
+                    } else if state == RtmpConnectionState::Publishing {
+                        publish_pending = false;
+                    }
                     if let Some(state) = map_publish_state(state) {
                         events.push(SessionEvent::StateChanged(state));
                     }
                 }
-                RtmpConnectionEvent::DisconnectedByPeer { reason } => {
-                    tracing::warn!(%reason, "RTMP publisher peer disconnected at the protocol boundary");
-                    events.push(SessionEvent::PeerDisconnected);
+                RtmpConnectionEvent::DisconnectedByPeer { .. } => {
+                    tracing::warn!(
+                        publish_pending,
+                        "RTMP publisher peer disconnected at the protocol boundary"
+                    );
+                    if publish_pending {
+                        events.push(SessionEvent::RequestRejected {
+                            kind: RequestKind::Publish,
+                        });
+                    } else {
+                        events.push(SessionEvent::PeerDisconnected);
+                    }
                 }
                 RtmpConnectionEvent::CommandIgnored { .. }
                 | RtmpConnectionEvent::MessageIgnored { .. }
@@ -828,6 +844,7 @@ fn map_avc_packet_kind(kind: AvcPacketType) -> RawAvcPacketKind {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aimedia_core::config::{ReconnectConfig, SecretRef};
 
     #[test]
     fn cleartext_publish_and_listener_sessions_complete_a_sans_io_loopback() {
@@ -860,6 +877,85 @@ mod tests {
         assert_eq!(publisher.state(), SessionState::Publishing);
         assert!(listener.stats().pending_outbound_bytes <= MAX_CONTROL_SEND_BYTES);
         assert!(publisher.stats().pending_outbound_bytes <= MAX_CONTROL_SEND_BYTES);
+    }
+
+    #[test]
+    fn publish_query_reference_is_transmitted_without_entering_the_endpoint() {
+        let query_path = std::env::temp_dir().join(format!(
+            "aimedia-rtmp-query-{}-{}.txt",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::write(&query_path, "bandwidthtest=true\n").unwrap();
+        let config = RtmpConfig {
+            mode: RtmpMode::Publish,
+            stream_name: Some("program".to_owned()),
+            stream_name_ref: None,
+            publish_query_ref: Some(SecretRef {
+                env: None,
+                file: Some(query_path.clone()),
+            }),
+            connect_timeout_ms: 3_000,
+            handshake_timeout_ms: 5_000,
+            read_timeout_ms: 10_000,
+            max_message_bytes: 1024 * 1024,
+            reconnect: ReconnectConfig::default(),
+        };
+        let mut listener =
+            ListenerSession::new("live", "program?bandwidthtest=true", 1024 * 1024).unwrap();
+        let mut publisher =
+            PublishSession::from_config("rtmp://127.0.0.1:1935/live", &config).unwrap();
+        let _ = std::fs::remove_file(&query_path);
+
+        for _ in 0..32 {
+            let client_bytes = publisher.drain_outbound(16 * 1024);
+            if !client_bytes.is_empty() {
+                listener.feed(&client_bytes).unwrap();
+            }
+            let server_bytes = listener.drain_outbound(16 * 1024);
+            if !server_bytes.is_empty() {
+                publisher.feed(&server_bytes).unwrap();
+            }
+            if publisher.state() == SessionState::Publishing {
+                break;
+            }
+        }
+
+        assert_eq!(listener.state(), SessionState::Publishing);
+        assert_eq!(publisher.state(), SessionState::Publishing);
+        assert!(!format!("{publisher:?}").contains("bandwidthtest"));
+    }
+
+    #[test]
+    fn publisher_classifies_a_rejected_publish_command_without_peer_details() {
+        let mut listener = ListenerSession::new("live", "allowed", 1024 * 1024).unwrap();
+        let mut publisher =
+            PublishSession::new("rtmp://127.0.0.1:1935/live", "denied", 1024 * 1024).unwrap();
+        let mut rejected = false;
+
+        for _ in 0..32 {
+            let client_bytes = publisher.drain_outbound(16 * 1024);
+            if !client_bytes.is_empty() {
+                listener.feed(&client_bytes).unwrap();
+            }
+            let server_bytes = listener.drain_outbound(16 * 1024);
+            if !server_bytes.is_empty() {
+                rejected |= publisher.feed(&server_bytes).unwrap().contains(
+                    &SessionEvent::RequestRejected {
+                        kind: RequestKind::Publish,
+                    },
+                );
+            }
+            if rejected {
+                break;
+            }
+        }
+
+        assert!(rejected);
+        assert_eq!(publisher.state(), SessionState::Disconnecting);
     }
 
     #[test]

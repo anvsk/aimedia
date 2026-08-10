@@ -544,6 +544,7 @@ mod tests {
             mode: RtmpMode::Listen,
             stream_name: Some("camera".to_owned()),
             stream_name_ref: None,
+            publish_query_ref: None,
             connect_timeout_ms: 3_000,
             handshake_timeout_ms: 3_000,
             read_timeout_ms: 3_000,

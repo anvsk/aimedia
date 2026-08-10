@@ -144,6 +144,28 @@ docker run --rm --gpus all \
   aimedia:gpu run -f /work/rtmp-output.yaml
 ```
 
+平台把签名参数放在推流 URL query 时，不要把 `?txSecret=...`、`?auth_key=...` 或
+`?bandwidthtest=true` 拼进 `uri`。在输出的 `rtmp` 下增加独立引用：
+
+```yaml
+streamNameRef:
+  env: AIMEDIA_RTMP_STREAM_NAME
+publishQueryRef:
+  env: AIMEDIA_RTMP_PUBLISH_QUERY
+```
+
+环境变量的值不带开头的 `?`。例如 Twitch 测试入口使用
+`AIMEDIA_RTMP_PUBLISH_QUERY=bandwidthtest=true`；腾讯云和阿里云使用平台生成的完整
+签名 query。启动媒体链前可先运行：
+
+```bash
+aimedia publish-check -f /work/rtmp-output.yaml --json
+```
+
+该命令只检查 endpoint、RTMPS 证书、RTMP 握手和 publish 授权，不打开输入、codec
+或 GPU；成功也不等于平台已经接受视频码率、GOP 和音频格式。完整平台证据使用
+`tools/platform.ps1`，并以[平台发布门槛报告](reports/platforms.md)为准。
+
 `control state --json` 的 `output.rtmp` 会报告 `transport`（`tcp` 或 `tls`）、连接状态、
 已发送 packet、重连次数和最近发送时间。平台互操作门禁未完成前，先用测试频道或平台
 提供的带宽测试入口验证，不能直接把 `experimental` 当成生产兼容承诺。
