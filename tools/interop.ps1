@@ -3,10 +3,11 @@ param(
     [string]$EngineImage = "aimedia:gpu",
     [string]$PeerImage = "aimedia:test-tools",
     [string]$DesktopImage = "aimedia:desktop-tools",
+    [string]$MediaImage = "bluenviron/mediamtx:1.20.0@sha256:86e63af28616d5e5a18540d7b031b6510bd4cbf1a3c7d224f9e2976f02aefbfb",
     [string]$AptMirror = "",
     [ValidateRange(4, 120)]
     [int]$DurationSeconds = 8,
-    [ValidateSet("all", "matrix", "ll", "lc", "cl", "cc", "netem", "corrupt", "backlog", "desktop", "obs", "obs-input", "obs-output", "vlc")]
+    [ValidateSet("all", "matrix", "ll", "lc", "cl", "cc", "netem", "corrupt", "backlog", "desktop", "obs", "obs-input", "obs-output", "vlc", "rtmp-obs", "rtmp-obs-input", "rtmp-obs-output")]
     [string]$Suite = "all",
     [switch]$SkipToolBuild,
     [switch]$KeepContainers
@@ -18,13 +19,19 @@ $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $runId = [Guid]::NewGuid().ToString("N").Substring(0, 8)
 $network = "am-io-$runId"
+$rtmpMedia = "am-$runId-rtmp-media"
 $runRoot = Join-Path ([IO.Path]::GetTempPath()) "aimedia-interop-$runId"
 $containers = [Collections.Generic.List[string]]::new()
 $results = [Collections.Generic.List[object]]::new()
 $desktopResults = [Collections.Generic.List[object]]::new()
 $corruptResult = $null
 $toolVersions = [ordered]@{}
-$needsDesktop = $Suite -in @("all", "desktop", "obs", "obs-input", "obs-output", "vlc")
+$needsDesktop = $Suite -in @(
+    "all", "desktop", "obs", "obs-input", "obs-output", "vlc",
+    "rtmp-obs", "rtmp-obs-input", "rtmp-obs-output"
+)
+$needsVlc = $Suite -in @("all", "desktop", "vlc")
+$needsRtmpMedia = $Suite -in @("rtmp-obs", "rtmp-obs-input", "rtmp-obs-output")
 
 function Invoke-Docker {
     param(
@@ -108,6 +115,40 @@ function Wait-ControlState {
     throw "control socket for $Engine was not ready:`n$($logs -join [Environment]::NewLine)"
 }
 
+function Wait-RtmpControlState {
+    param(
+        [Parameter(Mandatory)][string]$Engine,
+        [int]$TimeoutSeconds = 40
+    )
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    do {
+        $stateText = & docker exec $Engine aimedia control state --json 2>$null
+        $stateExit = $LASTEXITCODE
+        if ($stateExit -eq 0) {
+            try {
+                $state = (($stateText -join [Environment]::NewLine) | ConvertFrom-Json).state
+                if (
+                    $state.running -and
+                    $state.inputs[0].rtmp.connected -and
+                    $state.inputs[0].rtmp.packetsReceived -gt 0 -and
+                    $state.output.rtmp.connected -and
+                    $state.output.rtmp.packetsSent -gt 0
+                ) {
+                    return $state
+                }
+            }
+            catch {
+                # The control socket can become readable just before one complete JSON line arrives.
+            }
+        }
+        Start-Sleep -Milliseconds 500
+    } while ((Get-Date) -lt $deadline)
+
+    $logs = Invoke-Docker -Arguments @("logs", "--tail", "120", $Engine) -Capture
+    throw "RTMP control state for $Engine was not ready:`n$($logs -join [Environment]::NewLine)"
+}
+
 function Set-Netem {
     param([Parameter(Mandatory)][string[]]$Targets)
 
@@ -149,7 +190,7 @@ function Read-OutputProbe {
 
     $probeText = Invoke-Docker -Arguments @(
         "run", "--rm", "-v", "${ScenarioRoot}:/work:ro", "--entrypoint", "ffprobe",
-        $PeerImage, "-v", "error", "-show_streams", "-show_packets", "-of", "json",
+        $PeerImage, "-v", "quiet", "-show_streams", "-show_packets", "-of", "json",
         "/work/$FileName"
     ) -Capture
     $probe = ($probeText -join [Environment]::NewLine) | ConvertFrom-Json
@@ -233,6 +274,71 @@ outputs:
       mode: $OutputMode
       latencyMs: 120
       connectTimeoutMs: 10000
+      reconnect:
+        enabled: true
+        initialBackoffMs: 250
+        maxBackoffMs: 1000
+taps: []
+control:
+  socketPath: /run/aimedia/aimedia.sock
+  socketMode: "0660"
+"@
+    [IO.File]::WriteAllText($Path, $config, [Text.UTF8Encoding]::new($false))
+}
+
+function Write-RtmpJobConfig {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$Name
+    )
+
+    $config = @"
+apiVersion: aimedia/v1alpha2
+kind: MediaJob
+metadata:
+  name: $Name
+inputs:
+  - name: obs
+    role: custom
+    uri: rtmp://0.0.0.0:1935/live
+    rtmp:
+      mode: listen
+      streamName: camera
+      connectTimeoutMs: 3000
+      handshakeTimeoutMs: 5000
+      readTimeoutMs: 5000
+      maxMessageBytes: 8388608
+      reconnect:
+        enabled: true
+        initialBackoffMs: 250
+        maxBackoffMs: 1000
+processing:
+  video:
+    width: 1280
+    height: 720
+    fps: 30
+    bitrateKbps: 3000
+    gopMs: 1000
+    profile: main
+    bFrames: 0
+  audio:
+    sampleRate: 48000
+    channels: 2
+    bitrateKbps: 128
+  timing:
+    masterInput: 0
+    bufferMs: 120
+    maxSkewMs: 80
+outputs:
+  - name: program
+    uri: rtmp://${rtmpMedia}:1935/live
+    rtmp:
+      mode: publish
+      streamName: program
+      connectTimeoutMs: 3000
+      handshakeTimeoutMs: 5000
+      readTimeoutMs: 5000
+      maxMessageBytes: 8388608
       reconnect:
         enabled: true
         initialBackoffMs: 250
@@ -516,7 +622,8 @@ function Invoke-CorruptProbe {
 function Write-ObsConfig {
     param(
         [Parameter(Mandatory)][string]$ScenarioRoot,
-        [string]$Destination = ""
+        [string]$Destination = "",
+        [string]$DestinationKey = ""
     )
 
     $configRoot = Join-Path $ScenarioRoot "home/.config/obs-studio"
@@ -589,7 +696,7 @@ ChannelSetup=Stereo
         [IO.File]::WriteAllText((Join-Path $profileRoot "basic.ini"), $profile, [Text.UTF8Encoding]::new($false))
         $service = @{
             type = "rtmp_custom"
-            settings = @{ server = $Destination; key = "" }
+            settings = @{ server = $Destination; key = $DestinationKey }
         } | ConvertTo-Json -Compress
         [IO.File]::WriteAllText((Join-Path $profileRoot "service.json"), $service, [Text.UTF8Encoding]::new($false))
     }
@@ -605,10 +712,12 @@ function Start-Obs {
         [Parameter(Mandatory)][string]$Name,
         [Parameter(Mandatory)][string]$ScenarioRoot,
         [Parameter(Mandatory)][string[]]$ControllerArguments,
-        [string]$Destination = ""
+        [string]$Destination = "",
+        [string]$DestinationKey = ""
     )
 
-    Write-ObsConfig -ScenarioRoot $ScenarioRoot -Destination $Destination
+    Write-ObsConfig -ScenarioRoot $ScenarioRoot -Destination $Destination `
+        -DestinationKey $DestinationKey
     $controller = ($ControllerArguments | ForEach-Object { ConvertTo-ShellArgument $_ }) -join " "
     $command = @"
 dbus-run-session -- xvfb-run -a -s '-screen 0 1280x720x24 +extension GLX' obs --disable-shutdown-check --multi > /work/obs.log 2>&1 &
@@ -646,6 +755,31 @@ function Test-ObsCleanShutdown {
     }
     $log = [IO.File]::ReadAllText($logPath)
     return $log -notmatch "(?i)segmentation fault|core dumped"
+}
+
+function Read-ObsControllerResult {
+    param([Parameter(Mandatory)][string]$ScenarioRoot)
+
+    $path = Join-Path $ScenarioRoot "controller.log"
+    if (!(Test-Path $path)) {
+        throw "OBS did not produce controller.log"
+    }
+    $lastLine = Get-Content -LiteralPath $path |
+        Where-Object { $_.Trim().Length -gt 0 } |
+        Select-Object -Last 1
+    try {
+        $result = $lastLine | ConvertFrom-Json
+    }
+    catch {
+        throw "OBS controller did not finish with JSON: $lastLine"
+    }
+    if ($null -eq $result.screenshotBytes -or $null -eq $result.distinctColors) {
+        throw "OBS controller result omitted screenshot evidence: $lastLine"
+    }
+    if ($result.distinctColors -lt 4) {
+        throw "OBS rendered fewer than four distinct colors: $lastLine"
+    }
+    return $result
 }
 
 function Start-Engine {
@@ -689,10 +823,11 @@ function Invoke-ObsReceive {
     $obsExit = Wait-ContainerExit -Name $obs -TimeoutSeconds ($DurationSeconds + 45)
     $obsCleanShutdown = Test-ObsCleanShutdown -ScenarioRoot $scenarioRoot
     $framePath = Join-Path $scenarioRoot "frame.png"
-    if (!(Test-Path $framePath) -or (Get-Item $framePath).Length -lt 1000) {
+    if (!(Test-Path $framePath)) {
         $logs = Invoke-Docker -Arguments @("logs", "--tail", "120", $obs) -Capture
         throw "OBS did not render the aimedia output:`n$($logs -join [Environment]::NewLine)"
     }
+    $controller = Read-ObsControllerResult -ScenarioRoot $scenarioRoot
     $engineExit = Stop-Engine -Name $engine
     $null = Invoke-Docker -Arguments @("rm", "-f", $source) -Capture
     $desktopResults.Add([pscustomobject]@{
@@ -703,7 +838,8 @@ function Invoke-ObsReceive {
         engineExit = $engineExit
         inputConnected = $state.inputs[0].srt.connected
         outputConnected = $state.output.srt.connected
-        screenshotBytes = (Get-Item $framePath).Length
+        screenshotBytes = $controller.screenshotBytes
+        distinctColors = $controller.distinctColors
     })
 }
 
@@ -755,6 +891,213 @@ function Invoke-ObsSend {
         audioPackets = $probe.audioPackets
         firstVideoKeyframe = $probe.firstVideoKeyframe
         monotonicPtsDts = $probe.monotonicPtsDts
+    })
+}
+
+function Wait-RtmpMedia {
+    param([int]$TimeoutSeconds = 20)
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    do {
+        $logs = Invoke-Docker -Arguments @("logs", $rtmpMedia) -Capture
+        if (
+            @($logs | Where-Object {
+                $_ -match "\[RTMP\].*(started with listener|listener opened).*:1935"
+            }).Count -gt 0
+        ) {
+            return
+        }
+        Start-Sleep -Milliseconds 250
+    } while ((Get-Date) -lt $deadline)
+
+    throw "MediaMTX RTMP listener did not start"
+}
+
+function Start-RtmpSource {
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][string]$Engine
+    )
+
+    Start-TestContainer -Name $Name -Arguments @(
+        "--network", $network, $PeerImage, "ffmpeg",
+        "-hide_banner", "-loglevel", "warning", "-re",
+        "-f", "lavfi", "-i", "smptebars=size=1280x720:rate=30",
+        "-f", "lavfi", "-i", "sine=frequency=1700:sample_rate=48000",
+        "-t", "$($DurationSeconds + 30)",
+        "-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency",
+        "-profile:v", "main", "-pix_fmt", "yuv420p", "-bf", "0",
+        "-g", "30", "-keyint_min", "30", "-sc_threshold", "0", "-b:v", "3000k",
+        "-c:a", "aac", "-b:a", "128k", "-ar", "48000", "-ac", "2",
+        "-f", "flv", "rtmp://${Engine}:1935/live/camera"
+    )
+}
+
+function Wait-RtmpPlayable {
+    param([int]$TimeoutSeconds = 30)
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    do {
+        $probeText = & docker @(
+            "run", "--rm", "--network", $network, "--entrypoint", "ffprobe",
+            $PeerImage, "-v", "quiet", "-rw_timeout", "2000000",
+            "-show_entries", "stream=codec_type,codec_name,width,height,sample_rate,channels",
+            "-of", "json", "rtmp://${rtmpMedia}:1935/live/program"
+        ) 2>$null
+        $probeExit = $LASTEXITCODE
+        if ($probeExit -eq 0) {
+            try {
+                $probe = (($probeText -join [Environment]::NewLine) | ConvertFrom-Json)
+                $video = $probe.streams |
+                    Where-Object codec_type -eq "video" |
+                    Select-Object -First 1
+                $audio = $probe.streams |
+                    Where-Object codec_type -eq "audio" |
+                    Select-Object -First 1
+                if ($video.codec_name -eq "h264" -and $audio.codec_name -eq "aac") {
+                    return [pscustomobject]@{
+                        videoCodec = $video.codec_name
+                        width = [int]$video.width
+                        height = [int]$video.height
+                        audioCodec = $audio.codec_name
+                        sampleRate = [int]$audio.sample_rate
+                        channels = [int]$audio.channels
+                    }
+                }
+            }
+            catch {
+                # Retry until ffprobe observes complete audio and video stream metadata.
+            }
+        }
+        Start-Sleep -Milliseconds 500
+    } while ((Get-Date) -lt $deadline)
+
+    throw "MediaMTX RTMP program did not become playable"
+}
+
+function Start-RtmpCapture {
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][string]$ScenarioRoot,
+        [int]$Seconds = $DurationSeconds
+    )
+
+    Start-TestContainer -Name $Name -Arguments @(
+        "--network", $network, "-v", "${ScenarioRoot}:/work",
+        "--entrypoint", "timeout", $PeerImage,
+        "--signal=INT", "--kill-after=5", "${Seconds}s", "ffmpeg",
+        "-hide_banner", "-loglevel", "warning", "-y", "-copyts",
+        "-i", "rtmp://${rtmpMedia}:1935/live/program",
+        "-map", "0", "-c", "copy", "-copytb", "1",
+        "-avoid_negative_ts", "disabled", "-f", "flv", "/work/output.flv"
+    )
+}
+
+function Invoke-RtmpObsSend {
+    $scenarioRoot = Join-Path $runRoot "rtmp-obs-input"
+    $null = New-Item -ItemType Directory -Path $scenarioRoot
+    $engine = "am-$runId-rtmp-obs-input-engine"
+    $obs = "am-$runId-rtmp-obs-input"
+    $capture = "am-$runId-rtmp-obs-input-probe"
+    $configPath = Join-Path $scenarioRoot "job.yaml"
+    Write-RtmpJobConfig -Path $configPath -Name "rtmp-obs-input"
+
+    Invoke-Docker -Arguments @(
+        "run", "--rm", "-v", "${scenarioRoot}:/work", $PeerImage, "ffmpeg",
+        "-hide_banner", "-loglevel", "error", "-y",
+        "-f", "lavfi", "-i", "smptebars=size=1280x720:rate=30",
+        "-f", "lavfi", "-i", "sine=frequency=1500:sample_rate=48000",
+        "-t", "$($DurationSeconds + 20)", "-c:v", "libx264", "-preset", "ultrafast",
+        "-tune", "zerolatency", "-profile:v", "main", "-pix_fmt", "yuv420p",
+        "-bf", "0", "-g", "30", "-c:a", "aac", "-b:a", "128k",
+        "-ar", "48000", "-ac", "2", "-f", "mpegts", "/work/source.ts"
+    )
+
+    Start-Engine -Name $engine -ConfigPath $configPath
+    $null = Wait-ControlState -Engine $engine -TimeoutSeconds 20
+    Start-Obs -Name $obs -ScenarioRoot $scenarioRoot `
+        -Destination "rtmp://${engine}:1935/live" -DestinationKey "camera" `
+        -ControllerArguments @(
+            "produce", "--source", "/work/source.ts",
+            "--destination", "rtmp://${engine}:1935/live/camera",
+            "--duration", "$($DurationSeconds + 10)"
+        )
+    $state = Wait-RtmpControlState -Engine $engine
+    $stream = Wait-RtmpPlayable
+    Start-RtmpCapture -Name $capture -ScenarioRoot $scenarioRoot
+    $captureExit = Wait-ContainerExit -Name $capture `
+        -TimeoutSeconds ($DurationSeconds + 20) -AllowFailure
+    $obsExit = Wait-ContainerExit -Name $obs -TimeoutSeconds ($DurationSeconds + 45)
+    $obsCleanShutdown = Test-ObsCleanShutdown -ScenarioRoot $scenarioRoot
+    $engineExit = Stop-Engine -Name $engine
+    $probe = Read-OutputProbe -ScenarioRoot $scenarioRoot -FileName "output.flv"
+
+    $desktopResults.Add([pscustomobject]@{
+        scenario = "rtmp-obs-input"
+        role = "producer"
+        obsExit = $obsExit
+        cleanShutdown = $obsCleanShutdown
+        engineExit = $engineExit
+        captureExit = $captureExit
+        inputConnected = $state.inputs[0].rtmp.connected
+        outputConnected = $state.output.rtmp.connected
+        inputPackets = $state.inputs[0].rtmp.packetsReceived
+        outputPackets = $state.output.rtmp.packetsSent
+        videoCodec = $stream.videoCodec
+        audioCodec = $stream.audioCodec
+        videoPackets = $probe.videoPackets
+        audioPackets = $probe.audioPackets
+        firstVideoKeyframe = $probe.firstVideoKeyframe
+        monotonicPtsDts = $probe.monotonicPtsDts
+    })
+}
+
+function Invoke-RtmpObsReceive {
+    $scenarioRoot = Join-Path $runRoot "rtmp-obs-output"
+    $null = New-Item -ItemType Directory -Path $scenarioRoot
+    $engine = "am-$runId-rtmp-obs-output-engine"
+    $source = "am-$runId-rtmp-obs-output-source"
+    $obs = "am-$runId-rtmp-obs-output"
+    $configPath = Join-Path $scenarioRoot "job.yaml"
+    Write-RtmpJobConfig -Path $configPath -Name "rtmp-obs-output"
+
+    Start-Engine -Name $engine -ConfigPath $configPath
+    $null = Wait-ControlState -Engine $engine -TimeoutSeconds 20
+    Start-RtmpSource -Name $source -Engine $engine
+    $state = Wait-RtmpControlState -Engine $engine
+    $stream = Wait-RtmpPlayable
+    Start-Obs -Name $obs -ScenarioRoot $scenarioRoot -ControllerArguments @(
+        "consume", "--source", "rtmp://${rtmpMedia}:1935/live/program",
+        "--input-format", "flv", "--screenshot", "/work/frame.png",
+        "--duration", "$($DurationSeconds + 10)"
+    )
+    $obsExit = Wait-ContainerExit -Name $obs -TimeoutSeconds ($DurationSeconds + 45)
+    $obsCleanShutdown = Test-ObsCleanShutdown -ScenarioRoot $scenarioRoot
+    $framePath = Join-Path $scenarioRoot "frame.png"
+    if (!(Test-Path $framePath)) {
+        $logs = Invoke-Docker -Arguments @("logs", "--tail", "120", $obs) -Capture
+        throw "OBS did not render the RTMP output:`n$($logs -join [Environment]::NewLine)"
+    }
+    $controller = Read-ObsControllerResult -ScenarioRoot $scenarioRoot
+    $engineExit = Stop-Engine -Name $engine
+    $null = Invoke-Docker -Arguments @("rm", "-f", $source) -Capture
+
+    $desktopResults.Add([pscustomobject]@{
+        scenario = "rtmp-obs-output"
+        role = "consumer"
+        obsExit = $obsExit
+        cleanShutdown = $obsCleanShutdown
+        engineExit = $engineExit
+        inputConnected = $state.inputs[0].rtmp.connected
+        outputConnected = $state.output.rtmp.connected
+        videoCodec = $stream.videoCodec
+        width = $stream.width
+        height = $stream.height
+        audioCodec = $stream.audioCodec
+        sampleRate = $stream.sampleRate
+        channels = $stream.channels
+        screenshotBytes = $controller.screenshotBytes
+        distinctColors = $controller.distinctColors
     })
 }
 
@@ -834,21 +1177,33 @@ try {
         }
     }
     $null = Invoke-Docker -Arguments @("image", "inspect", $EngineImage) -Capture
+    if ($needsRtmpMedia) {
+        $null = Invoke-Docker -Arguments @("image", "inspect", $MediaImage) -Capture
+    }
     $toolVersions.ffmpeg = (Invoke-Docker -Arguments @(
         "run", "--rm", $PeerImage, "ffmpeg", "-version"
     ) -Capture | Select-Object -First 1)
     if ($needsDesktop) {
+        $toolVersions.obs = (Invoke-Docker -Arguments @(
+            "run", "--rm", $DesktopImage, "obs", "--version"
+        ) -Capture | Select-Object -First 1)
+    }
+    if ($needsVlc) {
         $null = Invoke-Docker -Arguments @(
             "run", "--rm", "-e", "LD_LIBRARY_PATH=", $DesktopImage,
             "sh", "-c", "test -f /usr/lib/x86_64-linux-gnu/vlc/plugins/access/libaccess_srt_plugin.so"
         ) -Capture
-        $toolVersions.obs = (Invoke-Docker -Arguments @(
-            "run", "--rm", $DesktopImage, "obs", "--version"
-        ) -Capture | Select-Object -First 1)
         $toolVersions.vlc = (Invoke-Docker -Arguments @(
             "run", "--rm", "--user", "911:1001", "-e", "HOME=/tmp",
             $DesktopImage, "cvlc", "--version"
         ) -Capture | Select-Object -First 1)
+    }
+    if ($needsRtmpMedia) {
+        $toolVersions.mediaMtx = (Invoke-Docker -Arguments @(
+            "run", "--rm", $MediaImage, "--version"
+        ) -Capture | Select-Object -First 1)
+        Start-TestContainer -Name $rtmpMedia -Arguments @("--network", $network, $MediaImage)
+        Wait-RtmpMedia
     }
 
     if ($Suite -in @("all", "matrix", "netem")) {
@@ -878,6 +1233,12 @@ try {
     if ($Suite -in @("all", "desktop", "obs", "obs-output")) {
         Invoke-ObsReceive
     }
+    if ($Suite -in @("rtmp-obs", "rtmp-obs-input")) {
+        Invoke-RtmpObsSend
+    }
+    if ($Suite -in @("rtmp-obs", "rtmp-obs-output")) {
+        Invoke-RtmpObsReceive
+    }
     if ($Suite -in @("all", "desktop", "vlc")) {
         Invoke-VlcReceive
     }
@@ -888,6 +1249,7 @@ try {
         engineImage = $EngineImage
         peerImage = $PeerImage
         desktopImage = $DesktopImage
+        mediaImage = if ($needsRtmpMedia) { $MediaImage } else { $null }
         durationSeconds = $DurationSeconds
         suite = $Suite
         toolVersions = $toolVersions

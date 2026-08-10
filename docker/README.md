@@ -122,6 +122,21 @@ pwsh ./tools/interop.ps1 `
 [OBS 官方 SRT 指南](https://obsproject.com/kb/srt-protocol-streaming-guide)。测试 OBS 的
 WebSocket 鉴权只在未暴露端口的临时容器内关闭，不是生产配置示例。
 
+OBS 的 RTMP 发布和接收可以单独运行。脚本临时启动固定 digest 的 MediaMTX：发布侧
+要求 ffprobe 读到 H.264/AAC、首帧 keyframe 与单调时间戳；接收侧由 OBS Media Source
+读取 FLV 并截图。截图门槛会解码 PNG、还原行过滤器并检查像素颜色多样性，不以文件
+大小猜测是否渲染成功：
+
+```powershell
+pwsh ./tools/interop.ps1 `
+  -EngineImage aimedia:gpu `
+  -PeerImage aimedia:test-tools `
+  -DesktopImage aimedia:desktop-tools `
+  -Suite rtmp-obs `
+  -DurationSeconds 20 `
+  -SkipToolBuild
+```
+
 VLC 的 SRT input module 位于 Ubuntu 的 `vlc-plugin-access-extra`，不能只根据
 `vlc --version` 判断 SRT 可用。脚本先检查插件文件，再通过 raw dump 保存 aimedia
 原始 TS；这样 ffprobe 检查的是引擎时间戳，而不是 VLC 重新 mux 后的时间戳。
@@ -187,4 +202,4 @@ pwsh ./tools/rtmp.ps1 `
 
 报告验证 H.264/AAC profile、两段媒体的逐包时间戳、输出恢复后的首个 keyframe、节目
 时钟连续性、输入/输出重连计数、p95 延迟、RSS、GPU surface、队列水位和运行镜像依赖。
-短门禁不代替 OBS、真实 RTMPS 平台或两小时 soak。
+短门禁和 OBS 门禁都不代替真实 RTMPS 平台或两小时 soak。

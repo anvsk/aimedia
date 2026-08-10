@@ -8,8 +8,9 @@
 
 测试包含输入 publisher 中断、输出 MediaMTX 中断，以及 40ms RTT、20ms 抖动、1%
 丢包。全部自动 gate 通过。420 秒回归还跨过了多个 RTMP ACK 窗口，输入和输出各只有
-一次计划内重连。它证明 FFmpeg、MediaMTX 和明文 RTMP 的短时互操作及故障恢复，不替代
-OBS、RTMPS 真实平台或两小时稳定性验证，因此状态仍是 `experimental`。
+一次计划内重连。2026-08-10 又完成 OBS 作为 publisher 和 consumer 的双向门槛，
+包含实际渲染与 ffprobe。它证明 FFmpeg、OBS、MediaMTX 和明文 RTMP 的短时互操作及
+故障恢复，不替代 RTMPS 真实平台或两小时稳定性验证，因此状态仍是 `experimental`。
 
 ## 可复现环境
 
@@ -22,6 +23,10 @@ OBS、RTMPS 真实平台或两小时稳定性验证，因此状态仍是 `experi
 | 测试工具 image | `sha256:67a84acef4d12fcc2a224c72c128bdfe80457c35d2f2d4132b7672265a4f5119` |
 | 视频 | H.264 Main、1920x1080、30fps、6Mbps、无 B 帧、1 秒 GOP |
 | 音频 | AAC-LC、48kHz、双声道、128kbps |
+
+OBS 门槛额外使用 OBS Studio 30.0.2.1 和桌面工具镜像
+`sha256:e5c63696b818430e389765a15c09d8d6340228464c94bea6bc95b2356d6215f0`；引擎镜像为
+`sha256:ea041dba0836edd9d9d6774553ee49f5a55579cf185df793f022936f42b3435d`。
 
 运行命令：
 
@@ -55,6 +60,27 @@ pwsh ./tools/rtmp.ps1 `
 
 网络损伤在 110—130 秒注入。结束时输入和输出均为连接状态，输出断线期间没有建立
 历史媒体队列；重连后从新的 SPS/PPS 与 IDR 恢复，节目时钟没有回退。
+
+### OBS publisher 与 consumer
+
+`tools/interop.ps1 -Suite rtmp-obs` 启动两条隔离场景，每条使用独立 OBS HOME、
+obs-websocket 控制器和 aimedia 管线：
+
+| 场景 | 自动验收结果 |
+|---|---|
+| OBS publisher -> aimedia -> MediaMTX -> ffprobe | OBS/aimedia 正常退出；输入/输出 connected；581 个 H.264 视频包、948 个 AAC 音频包；首视频包为 keyframe；PTS/DTS 单调 |
+| FFmpeg 测试源 -> aimedia -> MediaMTX -> OBS consumer | OBS/aimedia 正常退出；H.264 1280x720；AAC 48kHz 双声道；渲染 PNG 869 bytes，解码后 13 种颜色 |
+
+第二条场景先由 ffprobe 确认 MediaMTX 已发布 H.264/AAC，再要求 OBS Media Source
+截取真实画面。PNG 文件大小不作为通过依据；控制器使用标准库解压像素、还原 PNG
+filter，并要求至少 4 种颜色，从而拒绝黑帧、空帧和无效占位图。
+
+本机汇总位于
+`C:\Users\anvsk\AppData\Local\Temp\aimedia-interop-ca8b327d\summary.json`，SHA-256 为
+`A33EE13209444F303C4F12FD7A06124713C9BCE31BF5FA4243CACBBB1B8D5E65`。同一版本还跑了
+8 秒 SRT/OBS 回归：publisher 输出 300/469 个视频/音频包，consumer 截图检测到 16 种
+颜色；汇总 SHA-256 为
+`B2C3FF6ECD305CB3958D1A7FE85089EEB9F13249E2FC614C3A710CEAB147173C`。
 
 ### 420 秒 ACK 与重连回归
 
@@ -126,7 +152,6 @@ Release 附件保存并在报告中记录下载地址与哈希。
 
 ## 尚未完成
 
-- OBS 作为 RTMP publisher 和 consumer 的真实互操作；
 - 至少两个真实直播平台 endpoint，包括 RTMPS 证书与鉴权错误路径；
 - 1080p30 两小时 GPU soak；
 - 上述门槛完成前不把 RTMP/RTMPS 从 `experimental` 升为 `supported`。
