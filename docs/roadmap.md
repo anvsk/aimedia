@@ -214,7 +214,8 @@ v0.3 工程。只有 V2-11 也完成后，总览才把 v0.2 标记为完全完�
       确认 H.264/AAC、首帧 keyframe 和 PTS/DTS 单调；接收链由 OBS Media Source
       渲染 1280x720 彩条，并通过 PNG 解码后的颜色多样性确认不是黑帧或空图。两条链路
       的 OBS、aimedia 均正常退出；证据见 `tools/interop.ps1` 的 `rtmp-obs` suite 和
-      [RTMP 互操作报告](reports/rtmp.md)。
+      [RTMP 互操作报告](reports/rtmp.md)。交付：
+      [PR #39](https://github.com/anvsk/aimedia/pull/39)。
     - [ ] V3-03F3：至少两个真实平台 endpoint，覆盖 RTMPS 证书和鉴权路径。
     - [ ] V3-03F4：1080p30 两小时 GPU soak、资源趋势和原始证据附件。2026-08-06 的
       一次运行在 2,911 秒按用户要求主动停止；容器已清理，部分样本已记录，但该门槛
