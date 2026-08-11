@@ -234,7 +234,8 @@ v0.3 工程。只有 V2-11 也完成后，总览才把 v0.2 标记为完全完�
       仍未完成。
 - [x] **V3-04 HEVC Bridge**：按 [RFC 0004](rfcs/0004-hevc-bridge.md) 将中国市场常见的
   RTSP H.265 Main 输入转为平台通用 H.264/AAC 输出；不增加 H.265 输出或 Enhanced RTMP。
-  分阶段实现交付：[PR #41](https://github.com/anvsk/aimedia/pull/41)。
+  分阶段实现交付：[PR #41](https://github.com/anvsk/aimedia/pull/41)、
+  [PR #42](https://github.com/anvsk/aimedia/pull/42)。
   - [x] V3-04A：可配置 H.264/HEVC 的 NVDEC parser、capability 检查和共享 NV12 surface
     契约；只接受 progressive 8-bit 4:2:0、最高 1080p30。SDK 13.0 Linux release build
     通过，RTX 5060 Laptop 已把单个 HEVC IRAP 解成真实 NV12 surface。

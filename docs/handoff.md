@@ -4,7 +4,7 @@
 
 暂停点：V3-04A—D 完成；HEVC RTSP 到 H.264/AAC TS/SRT 的 90 秒真实 GPU 短门槛全绿
 
-Git 基线：`main` 的 `144fa43`，交付分支 `codex/fix/hevc-parameter-sets`，PR 待创建
+Git 基线：`main` 的 `144fa43`，交付分支 `codex/fix/hevc-parameter-sets`，PR #42
 
 ## 先读结论
 
