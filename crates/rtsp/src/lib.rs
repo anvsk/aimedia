@@ -641,12 +641,32 @@ impl RtspSession {
                     let reported_keyframe = frame.is_random_access_point();
                     let parameters_changed = frame.has_new_parameters();
                     let packet_loss = frame.loss();
-                    let data = Bytes::from(frame.into_data());
+                    let mut data = Bytes::from(frame.into_data());
                     // Some otherwise interoperable RTSP publishers do not preserve the random
                     // access marker through their RTP relay. Recovery must still recognize the
                     // codec-defined NAL type instead of dropping every HEVC frame forever.
-                    let keyframe =
-                        reported_keyframe || annex_b_contains_random_access(codec, data.as_ref());
+                    let inferred_keyframe =
+                        !reported_keyframe && annex_b_contains_random_access(codec, data.as_ref());
+                    if inferred_keyframe
+                        && let Some(ParametersRef::Video(parameters)) = self
+                            .inner
+                            .streams()
+                            .get(stream_id)
+                            .and_then(|stream| stream.parameters())
+                    {
+                        // Retina strips inline H.26x parameter sets and normally re-inserts the
+                        // canonical SDP copy for frames it classifies as random access. When our
+                        // codec-level fallback is the classifier, that insertion has already been
+                        // skipped, so restore the same self-describing Annex-B contract here.
+                        let extra_data = parameters.extra_data();
+                        if !extra_data.is_empty() {
+                            let mut access_unit = Vec::with_capacity(extra_data.len() + data.len());
+                            access_unit.extend_from_slice(extra_data);
+                            access_unit.extend_from_slice(&data);
+                            data = Bytes::from(access_unit);
+                        }
+                    }
+                    let keyframe = reported_keyframe || inferred_keyframe;
                     return Ok(MediaEvent::Video(EncodedVideoFrame {
                         stream_id,
                         codec,

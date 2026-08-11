@@ -27,9 +27,9 @@ fuzz targets.
 An RTSP/RTP session boundary wraps `retina 0.4.19` behind aimedia-owned types. Interleaved TCP
 H.264/H.265 and AAC/G.711 now enter the bounded native single-input runtime directly. SDP selects
 the H.264 or HEVC NVDEC path and both share the same 8-bit NV12 surface contract. H.264 has passed
-the short software gate; the constrained HEVC path has passed a real-GPU single-frame proof and a
-full Linux SDK release build, but its corrected end-to-end RTSP gate has not been rerun. RTSP remains
-experimental and the HEVC sub-capability remains foundation.
+the short software gate; the constrained HEVC path has also passed a 90-second real-GPU software
+gate through H.264/AAC MPEG-TS/SRT output, including source reconnect and network impairment. RTSP
+and the HEVC sub-capability remain experimental until physical-camera and long-run evidence exists.
 
 The concise `crates/rtmp` boundary now provides a cleartext listener and RTMP/RTMPS publisher.
 Reconnects never retain historical live packets and publishing resumes only from a fresh IDR with

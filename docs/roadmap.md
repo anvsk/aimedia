@@ -232,9 +232,10 @@ v0.3 工程。只有 V2-11 也完成后，总览才把 v0.2 标记为完全完�
     - [ ] V3-03F4：1080p30 两小时 GPU soak、资源趋势和原始证据附件。2026-08-06 的
       一次运行在 2,911 秒按用户要求主动停止；容器已清理，部分样本已记录，但该门槛
       仍未完成。
-- [ ] **V3-04 HEVC Bridge**：按 [RFC 0004](rfcs/0004-hevc-bridge.md) 将中国市场常见的
+- [x] **V3-04 HEVC Bridge**：按 [RFC 0004](rfcs/0004-hevc-bridge.md) 将中国市场常见的
   RTSP H.265 Main 输入转为平台通用 H.264/AAC 输出；不增加 H.265 输出或 Enhanced RTMP。
-  分阶段实现交付：[PR #41](https://github.com/anvsk/aimedia/pull/41)。
+  分阶段实现交付：[PR #41](https://github.com/anvsk/aimedia/pull/41)、
+  [PR #42](https://github.com/anvsk/aimedia/pull/42)。
   - [x] V3-04A：可配置 H.264/HEVC 的 NVDEC parser、capability 检查和共享 NV12 surface
     契约；只接受 progressive 8-bit 4:2:0、最高 1080p30。SDK 13.0 Linux release build
     通过，RTX 5060 Laptop 已把单个 HEVC IRAP 解成真实 NV12 surface。
@@ -242,12 +243,12 @@ v0.3 工程。只有 V2-11 也完成后，总览才把 v0.2 标记为完全完�
     视频边界表达为运行时确定的 `compressedVideo`，SRT/RTMP 继续明确为 H.264。RTSP
     adapter 还会从 Annex-B NAL type 兜底识别 H.264 IDR/HEVC IRAP，避免 relay 丢失
     random-access 标记后永久卡在恢复闸门。
-  - [ ] V3-04C：短时真实 GPU 链路 `RTSP/HEVC -> NVDEC -> NVENC H.264 -> SRT/RTMP`，
-    验证输出 codec、首帧 IDR、单调时间戳、断线后等待新 IRAP 和 surface 上限。两次
-    软件源门槛分别发现并修复 random-access 标记丢失和 NVDEC 空 display queue 误判；
-    修复后的完整门槛按用户要求未继续重跑，证据见 [HEVC 验证记录](reports/hevc.md)。
-  - [x] V3-04D：支持矩阵、RFC、快速入门和验证记录已按真实状态更新；闭环重验前标记
-    `foundation`，之后即使软件发送端通过仍保持 RTSP `experimental`，不能代替
+  - [x] V3-04C：短时真实 GPU 链路 `RTSP/HEVC -> NVDEC -> NVENC H.264 -> TS/SRT` 已
+    通过。90 秒门禁覆盖发布源断开恢复、40ms RTT/20ms 抖动/1% 丢包；外部探针确认
+    H.264 首帧 keyframe、PTS/DTS/PCR 零回退、PCR 最大间隔 33.3ms，p95 107ms，GPU
+    surface 高水位 3/4 且所有队列有界。证据见 [HEVC 验证记录](reports/hevc.md)。
+  - [x] V3-04D：支持矩阵、RFC、快速入门和验证记录已按真实状态更新；软件发送端通过后
+    HEVC 输入子能力升级为 `experimental`，RTSP 整体仍保持 `experimental`，不能代替
     V3-02F2 的物理摄像机认证。
 - [ ] **V3-05 格式归一化**：720p/1080p、25/30/50/60fps、横竖屏、44.1/48kHz
   和单/双声道。

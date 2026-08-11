@@ -49,6 +49,9 @@ enum Command {
         /// How long a live SRT probe collects media.
         #[arg(long, default_value_t = 3_000)]
         duration_ms: u64,
+        /// SRT receive/peer latency in milliseconds for a live probe.
+        #[arg(long, default_value_t = 120)]
+        latency_ms: u64,
     },
     /// Validate and run a media job.
     Run {
@@ -245,7 +248,8 @@ async fn main() -> Result<()> {
             json,
             mode,
             duration_ms,
-        } => command_probe(&source, json, mode, duration_ms).await,
+            latency_ms,
+        } => command_probe(&source, json, mode, duration_ms, latency_ms).await,
         Command::Run {
             file,
             dry_run,
@@ -411,9 +415,10 @@ async fn command_probe(
     output_json: bool,
     mode: Option<SrtCliMode>,
     duration_ms: u64,
+    latency_ms: u64,
 ) -> Result<()> {
     if source.starts_with("srt://") {
-        return command_probe_srt(source, output_json, mode, duration_ms).await;
+        return command_probe_srt(source, output_json, mode, duration_ms, latency_ms).await;
     }
     let path = source.strip_prefix("file://").unwrap_or(source);
     let report = probe_path(path).with_context(|| format!("failed to probe {path:?}"))?;
@@ -457,12 +462,17 @@ async fn command_probe_srt(
     output_json: bool,
     mode: Option<SrtCliMode>,
     duration_ms: u64,
+    latency_ms: u64,
 ) -> Result<()> {
     if duration_ms == 0 || duration_ms > 86_400_000 {
         bail!("--duration-ms must be between 1 and 86400000");
     }
+    if !(20..=8_000).contains(&latency_ms) {
+        bail!("--latency-ms must be between 20 and 8000");
+    }
     let config = SrtConfig {
         mode: mode.map(Into::into),
+        latency_ms,
         ..SrtConfig::default()
     };
     let endpoint = Endpoint::from_config(source, &config, None)?;
@@ -528,6 +538,7 @@ async fn command_probe_srt(
     let report = json!({
         "source": redact_srt_uri(source),
         "durationMs": started.elapsed().as_millis(),
+        "configuredLatencyMs": config.latency_ms,
         "bytes": bytes,
         "mediaPackets": media_packets,
         "continuityErrors": continuity_errors,
