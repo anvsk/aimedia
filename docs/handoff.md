@@ -1,10 +1,10 @@
 # 暂停交接：v0.3 Normalize & Bridge
 
-更新时间：2026-08-10
+更新时间：2026-08-11
 
-暂停点：V3-04A/B/D 完成；V3-04C 修复后的 HEVC RTSP 完整短门槛按用户要求未继续重跑
+暂停点：V3-04A—D 完成；HEVC RTSP 到 H.264/AAC TS/SRT 的 90 秒真实 GPU 短门槛全绿
 
-Git 基线：`main` 的 `13c0f67`，交付分支 `codex/feat/hevc-bridge`，PR #41
+Git 基线：`main` 的 `144fa43`，交付分支 `codex/fix/hevc-parameter-sets`，PR 待创建
 
 ## 先读结论
 
@@ -13,9 +13,9 @@ Git 基线：`main` 的 `13c0f67`，交付分支 `codex/feat/hevc-bridge`，PR #
 再发布到平台；不做 CDN、播放器或 FFmpeg 全格式复刻。
 
 已经 `supported` 的市场闭环仍是单路 SRT/MPEG-TS。RTSP 和 RTMP 已有真实 GPU 数据面，
-但设备、平台或长稳证据不完整，必须继续标记 `experimental`。受限 HEVC 输入桥接代码
-已经接入，完整 RTSP 闭环复验前单独保持 `foundation`。暂停后不要进入 v0.4，应先关闭
-本文件列出的 v0.3 外部门槛。
+但设备、平台或长稳证据不完整，必须继续标记 `experimental`。受限 HEVC 输入桥接已由
+软件源短门禁从 `foundation` 升为 `experimental`；这不代表物理 H.265 摄像机已经认证。
+本交付合并后按用户要求暂停，不进入 V3-05 或 v0.4。
 
 ## 已交付到哪里
 
@@ -29,9 +29,9 @@ Git 基线：`main` 的 `13c0f67`，交付分支 `codex/feat/hevc-bridge`，PR #
 | RTMP publisher ACK 竞态修复 | 本交付 | PR #38；`anvsk/rtmp-rs@00e97a6` |
 | OBS RTMP publisher/consumer 与实际渲染 | 本交付 | PR #39；`tools/interop.ps1 -Suite rtmp-obs`；`docs/reports/rtmp.md` |
 | 平台签名 query、`publish-check` 与脱敏平台报告 | 当前交付 | PR #40；`tools/platform.ps1`；`docs/reports/platforms.md` |
-| HEVC codec-selectable NVDEC 与 SDP runtime 接线 | 当前交付 | PR #41；`docs/rfcs/0004-hevc-bridge.md` |
+| HEVC codec-selectable NVDEC 与 SDP runtime 接线 | 已合并 | PR #41；`docs/rfcs/0004-hevc-bridge.md` |
 | HEVC 单 IRAP 真实 GPU 解码与 Linux SDK release build | 已通过 | `docs/reports/hevc.md` |
-| 修复后的 HEVC RTSP 到 H.264/SRT 完整短门槛 | 未完成 | 两次运行发现的问题均已修复，但按用户要求未第三次重跑 |
+| HEVC RTSP 到 H.264/AAC TS/SRT 完整短门槛 | 当前交付已通过 | 90 秒、故障恢复、网络损伤、p95 107ms；`docs/reports/hevc.md` |
 | RTMP 真实平台、完整两小时 soak | 未完成 | 保持 `experimental` |
 | v0.4 多输出与 AI Tap | 未开始 | 暂停期间不要开发 |
 
@@ -91,22 +91,27 @@ SRT/TS | RTSP/RTP | RTMP/FLV
 输入时间戳只用于映射，输出始终使用独立单调节目时钟。协议 crate 不拥有无界队列；
 FFmpeg 和 MediaMTX 只属于测试端，不进入运行镜像。
 
-## 必须先处理的未完成项
+## 本阶段关闭项
 
-### 0. HEVC V3-04C
+### HEVC V3-04C
 
 V3-04A/B/D 已完成：`NvdecCodec` 固定 H.264/HEVC parser 与 capability，RTSP 根据 SDP
 选择 decoder，执行图使用 `compressedVideo` 表达运行时确定的 RTSP 视频 codec；SRT/TS
 和传统 RTMP 仍为 H.264。RTX 5060 Laptop 已把 1080p HEVC Main IRAP 解成共享 NV12
 surface，完整 Linux SDK 13.0 release build 通过。
 
-第一次 RTSP 门槛因 relay 丢失 random-access 标记而把 2,393 个视频 AU 全部挡在恢复
-闸门外；adapter 现在从 Annex-B NAL type 兜底识别 H.264 IDR 5 和 HEVC IRAP 16—23。
-第二次门槛在参数/预热 AU 上触发 `NVDEC parser produced a frame before format`；根因是
-空 display queue 被误判为已有帧，现已改成只有真实 display callback 才要求 format。
-按用户要求没有继续第三次 90 秒运行，所以 V3-04C 与总 V3-04 不得打勾。下次若用户允许
-短验证，只需重跑 `tools/rtsp.ps1 -VideoCodec hevc`，不必重新定位这两个问题。完整细节见
-[HEVC 验证记录](reports/hevc.md)。
+早期门槛依次定位了三个真实边界：relay 丢失 random-access 标记、空 NVDEC display
+queue 被误判为已有帧，以及 Retina SIMPLE 在库未标记关键帧时剥离 VPS/SPS/PPS 却不
+重新插入。adapter 现在会从 Annex-B 识别安全恢复点，并在兜底识别生效时前置当前 SDP
+规范化参数集；NVDEC 只有收到真实 display callback 才要求 format。
+
+最终 90 秒门禁使用 RTX 5060 Laptop + 577.12、SDK 13.0、MediaMTX 1.20.0 和 libx265
+软件源：解码 2,379 帧 HEVC，编码 2,549 帧 H.264；外部探针首视频包为 keyframe，
+PTS/DTS/PCR 零回退，PCR 最大间隔 33.3ms；发布源恢复后 RTSP 重连一次，40ms RTT、
+20ms 抖动、1% 丢包下 TS 连续性错误为零；p95 107ms，surface 最高 3/4，全部队列
+不越界。V3-04 已关闭，完整细节和 SHA-256 见 [HEVC 验证记录](reports/hevc.md)。
+
+## 恢复后仍需处理的未完成项
 
 ### 1. RTMP V3-03F
 
@@ -202,9 +207,9 @@ keepalive timer 可能饥饿，MediaMTX 最终按 read timeout 关闭 reader；�
 - 当前平台报告只证明门槛成功/失败分层；YouTube/Twitch 的本轮结果受本机代理路径阻断，
   没有真实 accepted 媒体证据。
 - RTMP 只支持传统 FLV AVC/AAC，不支持 Enhanced RTMP、HEVC、AV1、观众播放或 GOP cache。
-- RTSP 只支持 TCP interleaved；H.265 到 H.264 bridge 的代码与单帧 GPU proof 已完成，
-  修复后的完整软件源闭环未复验；UDP 尚未实现。
-- 不要把 `foundation`、内部回环或 180 秒短门禁写成生产支持。
+- RTSP 只支持 TCP interleaved；H.265 到 H.264 软件源短闭环已通过，但物理摄像机、
+  两小时长稳和 UDP 尚未完成。
+- 不要把 `experimental`、内部回环或短门禁写成生产支持。
 - 社区账号仍受 Hacker News / Reddit 新账号审核限制，不得刷帖、刷评论或规避过滤。
 
 ## 下次恢复步骤
@@ -217,19 +222,20 @@ git switch -c codex/feat/<next-slice>
 ```
 
 确认状态里只有预期改动和未跟踪的 `apps/`。先读 `docs/roadmap.md`、
-`docs/support-matrix.md`、`docs/reports/rtmp.md` 和本文件，再从最早的未完成外部门槛继续。
+`docs/support-matrix.md`、`docs/reports/hevc.md` 和本文件。恢复后优先选择一个能够形成
+完整用户闭环的切片：有平台账号就关闭 V3-03F3c；有物理摄像机就推进 V3-02F2；如果
+只能继续代码开发，再从 V3-05 格式归一化拆一个可单独验收的垂直切片。不要同时开三条线。
 每个切片仍从最新 `main` 建独立 `codex/*` 分支，通过 PR 合并；不要直接提交 `main`。
 
 最低回归命令：
 
 ```powershell
 cargo fmt --all -- --check
-cargo test -p aimedia-rtmp
-docker build -f docker/Dockerfile.gpu --target sdk-runtime -t aimedia:rtmp-next .
-pwsh ./tools/rtmp.ps1 -EngineImage aimedia:rtmp-next -DurationSeconds 420 `
-  -InputFaultAtSeconds 60 -InputFaultSeconds 8 `
-  -OutputFaultAtSeconds 300 -OutputFaultSeconds 8 `
-  -ImpairAtSeconds 350 -ImpairSeconds 20
+docker buildx build -f docker/Dockerfile.gpu --target sdk-runtime `
+  -t aimedia:hevc-next --load .
+pwsh ./tools/rtsp.ps1 -EngineImage aimedia:hevc-next -VideoCodec hevc `
+  -DurationSeconds 90 -FaultAtSeconds 20 -FaultSeconds 5 `
+  -ImpairAtSeconds 50 -ImpairSeconds 10 -SampleIntervalSeconds 5
 ```
 
 提交前还要在 Linux builder 跑 workspace tests、严格 Clippy、release build，并等待 GitHub
@@ -237,7 +243,7 @@ pwsh ./tools/rtmp.ps1 -EngineImage aimedia:rtmp-next -DurationSeconds 420 `
 
 ## 暂停原则
 
-本交付合并后可以按用户要求暂停，不创建 v0.4 分支，不继续后台长稳测试，也不发布
-“RTMP 已 supported”的社区广告。下次恢复先完成 V3-03F3c 的两个真实平台 accepted
-媒体证据；V3-03F4 两小时长稳必须等用户重新允许。优先补外部证据，不继续增加新协议
-或格式。
+本交付合并后按用户要求暂停，不创建 V3-05/v0.4 分支，不继续后台长稳测试。可以只发布
+一次准确的 V3-04 技术进展，但必须写明 HEVC/RTSP 仍是 `experimental`，不得宣传为
+FFmpeg 已被完整替代或生产级摄像机支持。V3-03F4 和 V3-02F 的两小时长稳必须等用户
+重新允许。

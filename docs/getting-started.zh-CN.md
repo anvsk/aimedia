@@ -15,8 +15,8 @@ RTMP/FLV ----> FLV tag 转换 ---/                         |
 ```
 
 v0.2 的 supported 基线固定 H.264 8-bit 4:2:0、最高 1080p30、AAC-LC 48kHz 双声道。
-V3-04 正在增加受限的 RTSP H.265 Main 输入到 H.264 输出桥接；固定支持范围不是永久
-限制，而是为了先把一个真实工作流做完。
+V3-04 已增加受限的 RTSP H.265 Main 输入到 H.264 输出桥接；固定支持范围不是永久限制，
+而是为了先把一个真实工作流做完。
 
 不熟悉缩写时先看[术语表](glossary.md)，新架构见[架构说明](architecture.md)。
 
@@ -40,10 +40,10 @@ RTP 拆包，产出的 H.264/H.265、AAC-LC/G.711 压缩帧直接进入统一 co
 双声道。H.265 会按 SDP 选择 HEVC NVDEC，解成同一个 8-bit NV12 GPU 帧契约，再由
 NVENC 输出 H.264；这不是 H.265 发布能力。
 
-H.265 目前仍是 `foundation`：真实 GPU 单帧解码和完整 Linux release build 已通过，
-但修复后的软件 RTSP 闭环尚未重跑。RTSP 整体仍是 `experimental`；UDP、非 48kHz
-双声道 AAC、物理摄像机兼容和长稳也未完成。准确状态和两次门槛发现的问题见
-[HEVC 验证记录](reports/hevc.md)。
+H.265 输入桥接目前是 `experimental`：真实 GPU 单帧、完整 Linux release build 和
+90 秒软件 RTSP 到 H.264/AAC TS/SRT 闭环均已通过，短门禁还覆盖断线恢复和网络损伤。
+RTSP 整体仍是 `experimental`；UDP、非 48kHz 双声道 AAC、物理摄像机兼容和长稳未
+完成。准确状态、指标和门禁发现的问题见[HEVC 验证记录](reports/hevc.md)。
 
 RTMP 输入/输出同样直接接公共压缩包边界：listener 把 FLV tag 转为 H.264 Annex-B 和
 AAC ADTS，publisher 做反向转换，因此不会为了跨协议发布多做一次 TS 封装/拆包。

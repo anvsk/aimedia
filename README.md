@@ -50,10 +50,10 @@
 
 - 多输出和 Analyzer Tap 数据面。通用 `MediaJob` v2 配置已经取代旧导播配置；旧文件
   只能通过显式转换命令迁移，不会在运行时静默兼容。
-- RTSP H.264 TCP 已通过 MediaMTX 外部软件短门禁；受限 H.265 Main 输入桥接已完成
-  SDK release build、真实 GPU 单帧解码和 runtime 接线，但修复后的完整 RTSP 软件源
-  门槛尚未重跑。物理摄像机认证、两小时长稳和 UDP 也未完成，因此 RTSP 保持
-  `experimental`，H.265 子能力保持 `foundation`。
+- RTSP H.264 TCP 已通过 MediaMTX 外部软件短门禁；受限 H.265 Main 输入桥接也已通过
+  90 秒真实 GPU 软件源闭环，覆盖发布源重连、网络损伤、H.264 首帧 keyframe、单调
+  时间戳和有界 surface。物理摄像机认证、两小时长稳和 UDP 未完成，因此 RTSP 与
+  H.265 子能力都保持 `experimental`。
 - RTMP listener 与 publisher 已通过 FFmpeg、OBS 和 MediaMTX 外部门禁，覆盖实际渲染、
   输入/输出重连、网络损伤、IDR 恢复和节目 PTS 连续；RTMPS 使用公开 WebPKI 信任根，
   不提供跳过校验开关。平台 stream key 和腾讯/阿里/Twitch 等签名 query 可分别通过

@@ -16,9 +16,9 @@ RTSP 摄像机 -> RTP 音视频 -> access unit / PCM -> 现有节目时间线
 
 H.264 + AAC/G.711 会在 V3-02 形成真实单路闭环。H.265 在本阶段完成 SDP 识别、RTP
 重组和类型化输出；NVDEC HEVC 到 NVENC H.264 的闭环由
-[RFC 0004](0004-hevc-bridge.md)继续实现。V3-04 已删除 `videoBridgePending` 并按 SDP
-选择 codec，但完整软件源门槛复验完成前仍不能把“代码已接通”写成“支持 H.265
-摄像机”。
+[RFC 0004](0004-hevc-bridge.md)继续实现。V3-04 已删除 `videoBridgePending`、按 SDP
+选择 codec，并通过软件 RTSP/HEVC 到 H.264/AAC TS/SRT 的短 GPU 门禁；物理设备和
+长稳未完成前仍不能把它写成“支持任意 H.265 摄像机”。
 
 ## 为什么复用 retina
 
@@ -174,8 +174,8 @@ payload 损坏必须使用稳定阶段码。可恢复的网络/会话错误只�
 - 网络：TCP、1% 丢包、20ms 抖动、40ms RTT、会话超时、401 拒绝和输入重连；UDP
   按 V3-02D 的产品决策延后，不属于 v0.3 发布门槛。
 - GPU 闭环：H.264 + AAC/G.711 输入，1080p30 输出 SRT，PTS/DTS/PCR 单调；H.265 的
-  SDP/runtime/NVDEC 接线由 V3-04 完成，但软件 RTSP 闭环和物理设备门槛未完成前保持
-  `foundation`/`experimental`，详见 [HEVC 验证记录](../reports/hevc.md)。
+  SDP/runtime/NVDEC 接线和软件 RTSP 短闭环由 V3-04 完成，物理设备门槛和长稳完成前
+  保持 `experimental`，详见 [HEVC 验证记录](../reports/hevc.md)。
 - 稳定性：两小时运行中所有队列和重组缓存有水位，RSS/GPU 内存不持续增长；凭证不在
   日志、状态、错误或崩溃上下文出现。
 

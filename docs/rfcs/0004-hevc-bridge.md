@@ -70,8 +70,8 @@ RTSP SDP 在连接后才确定 codec，因此 CLI 先建立 DESCRIBE/SETUP/PLAY�
 - V3-04C：软件 RTSP/HEVC 发送端经过真实 GPU 转成 H.264，并由外部接收端验证。
 - V3-04D：文档与支持矩阵校准；物理摄像机仍由 V3-02F2 单独认证。
 
-V3-04C 至少需要证明输出为 H.264/AAC、首视频包为 IDR、PTS/DTS/PCR 单调、无 CPU
-像素回退且 surface 水位不越界。用户已要求停止长时间测试，因此这里只运行短时门槛，
-不把它写成两小时或生产稳定性证据。当前实现和两次未通过门槛的根因见
-[HEVC 输入桥接验证记录](../reports/hevc.md)；修复后的完整链路尚未复验，所以 V3-04C
-仍保持未完成。
+V3-04C 已用 90 秒软件 RTSP/HEVC 源证明 TS/SRT 输出为 H.264/AAC、首视频包为
+keyframe、PTS/DTS/PCR 单调、无 CPU 像素回退且 surface 水位不越界；门禁还覆盖发布源
+断开恢复和 40ms RTT、20ms 抖动、1% 丢包。该短证据不能写成两小时或生产稳定性证据，
+物理摄像机和长稳仍归 V3-02F。实现、修复根因和结构化指标见
+[HEVC 输入桥接验证记录](../reports/hevc.md)。

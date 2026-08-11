@@ -77,5 +77,6 @@ IDR 开始的节目流。发布源中断期间，节目时钟继续输出最后�
 - 两台不同厂商物理摄像机或两个 ONVIF 合规设备；
 - G.711 外部设备链路；
 - RTSP 两小时 1080p30 soak；
-- UDP RTP、H.265 到 H.264 GPU bridge；
+- UDP RTP；H.265 到 H.264 GPU bridge 的软件源短门禁已在 V3-04 单独完成，但物理
+  摄像机和长稳仍未完成，见 [HEVC 验证记录](hevc.md)；
 - 真实设备完成前不把 RTSP 从 `experimental` 升为 `supported`。

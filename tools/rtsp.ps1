@@ -117,6 +117,43 @@ function Convert-ToInt64 {
     return [int64]$values[0]
 }
 
+function Convert-ProbeLog {
+    param([Parameter(Mandatory)][object[]]$Lines)
+
+    $textLines = @($Lines | ForEach-Object { [string]$_ })
+    $firstJsonLine = -1
+    $lastJsonLine = -1
+    for ($index = 0; $index -lt $textLines.Count; $index++) {
+        if ($firstJsonLine -lt 0 -and $textLines[$index].Trim() -eq "{") {
+            $firstJsonLine = $index
+        }
+        if ($firstJsonLine -ge 0 -and $textLines[$index].Trim() -eq "}") {
+            $lastJsonLine = $index
+        }
+    }
+    if ($firstJsonLine -lt 0 -or $lastJsonLine -lt $firstJsonLine) {
+        throw "probe completed without a JSON object:`n$($textLines -join [Environment]::NewLine)"
+    }
+
+    $jsonText = $textLines[$firstJsonLine..$lastJsonLine] -join [Environment]::NewLine
+    try {
+        $report = $jsonText | ConvertFrom-Json -ErrorAction Stop
+    }
+    catch {
+        throw "probe JSON was invalid: $($_.Exception.Message)`n$jsonText"
+    }
+    $diagnostics = [Collections.Generic.List[string]]::new()
+    for ($index = 0; $index -lt $textLines.Count; $index++) {
+        if (($index -lt $firstJsonLine -or $index -gt $lastJsonLine) -and $textLines[$index].Trim()) {
+            $diagnostics.Add($textLines[$index])
+        }
+    }
+    return [pscustomobject]@{
+        report = $report
+        diagnostics = @($diagnostics)
+    }
+}
+
 function Wait-Ready {
     param(
         [int]$TimeoutSeconds = 60,
@@ -405,8 +442,9 @@ try {
     $probeDurationMs = [int64]($DurationSeconds + 15) * 1000
     Start-Container -Name $probe -Arguments @(
         "--network", $network, $EngineImage,
-        "probe", "srt://${engine}:10000?latency=20000",
-        "--mode", "caller", "--duration-ms", "$probeDurationMs", "--json"
+        "probe", "srt://${engine}:10000",
+        "--mode", "caller", "--duration-ms", "$probeDurationMs",
+        "--latency-ms", "240", "--json"
     )
 
     $initialState = Wait-Ready
@@ -501,7 +539,13 @@ try {
 
     $probeExit = Wait-ContainerExit -Name $probe -TimeoutSeconds 45
     $probeText = Invoke-Docker -Arguments @("logs", $probe) -Capture
-    $probeReport = ($probeText -join [Environment]::NewLine) | ConvertFrom-Json
+    [IO.File]::WriteAllLines(
+        (Join-Path $runRoot "probe.log"),
+        [string[]]$probeText,
+        [Text.UTF8Encoding]::new($false)
+    )
+    $parsedProbe = Convert-ProbeLog -Lines @($probeText)
+    $probeReport = $parsedProbe.report
     $null = Invoke-Docker -Arguments @("kill", "--signal=SIGINT", $engine) -Capture
     $engineExit = Wait-ContainerExit -Name $engine -TimeoutSeconds 30
 
@@ -575,6 +619,7 @@ try {
         }
         samples = $samples.Count
         probe = $probeReport
+        probeDiagnostics = $parsedProbe.diagnostics
         finalState = $finalState
         memory = [pscustomobject]@{
             rssStartBytes = [int64]$rssStart
